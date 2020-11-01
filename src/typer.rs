@@ -2,26 +2,54 @@ use crate::ast;
 use crate::tast::TypeVariable::*;
 use crate::tast::{self, *};
 
-pub fn infer_types(stmt: ast::Statement) -> Result<Statement, String> {
-    let mut assignments = assign_types_statement(stmt, TypeId::new()).0;
+pub fn infer_types(program: ast::Program) -> Result<Program, String> {
+    let mut assignments = assign_types_program(program);
     println!("Assignments: {:?}", assignments);
     let mut equations = Vec::new();
-    create_equations_statement(&assignments, &mut equations);
+    create_equations_program(&assignments, &mut equations);
     println!("Equations: {:?}", equations);
     let solutions = unify(equations)?;
     println!("Solutions: {:?}", solutions);
-    set_types_statement(&mut assignments, &solutions);
+    set_types_program(&mut assignments, &solutions);
     Ok(assignments)
+}
+
+fn assign_types_program(program: ast::Program) -> Program {
+    let mut stmts = Vec::new();
+    let mut next_id = TypeId::new();
+    for stmt in program.0 {
+        let (assigned, nxt_id) = assign_types_statement(stmt, next_id);
+        stmts.push(assigned);
+        next_id = nxt_id;
+    }
+    Program(stmts)
 }
 
 fn assign_types_statement(stmt: ast::Statement, cur_id: TypeId) -> (Statement, TypeId) {
     use ast::Statement::*;
     match stmt {
-        Expression { token, value } => {
+        Expression { value, .. } => {
             let (exp, next_id) = assign_types_expression(value, cur_id);
-            (Statement::Expression { token, value: exp }, next_id)
+            (Statement::Expression { value: exp }, next_id)
         }
-        Block { token, statements } => {
+        Let {
+            name, expression, ..
+        } => {
+            let (exp, next_id) = assign_types_expression(*expression, cur_id);
+            let (ident_id, next_id) = next_id.next();
+            let ident = Identifier {
+                tpe: Unknown(ident_id),
+                value: name.value,
+            };
+            (
+                Statement::Let {
+                    name: ident,
+                    expression: Box::new(exp),
+                },
+                next_id,
+            )
+        }
+        Block { statements, .. } => {
             let mut stmts = Vec::new();
             let mut next_id = cur_id;
             for stmt in statements {
@@ -29,13 +57,7 @@ fn assign_types_statement(stmt: ast::Statement, cur_id: TypeId) -> (Statement, T
                 stmts.push(assigned);
                 next_id = nxt_id;
             }
-            (
-                Statement::Block {
-                    token,
-                    statements: stmts,
-                },
-                next_id,
-            )
+            (Statement::Block { statements: stmts }, next_id)
         }
         other => panic!(
             "assign_types only handles Statement::Expression, given: {:?}",
@@ -56,10 +78,10 @@ fn assign_types_expression(exp: ast::Expression, cur_id: TypeId) -> (Expression,
             // this means we'll have to pass down a map?
             let (id, next) = cur_id.next();
             (
-                Expression::Identifier {
-                    ident: tast::Identifier { value: ident.value },
+                Expression::Identifier(tast::Identifier {
                     tpe: Unknown(id),
-                },
+                    value: ident.value,
+                }),
                 next,
             )
         }
@@ -113,10 +135,22 @@ fn assign_types_expression(exp: ast::Expression, cur_id: TypeId) -> (Expression,
     }
 }
 
+fn create_equations_program(program: &Program, equations: &mut Equations) {
+    for stmt in program.0.iter() {
+        create_equations_statement(&stmt, equations);
+    }
+}
+
 fn create_equations_statement(stmt: &Statement, equations: &mut Equations) {
     use Statement::*;
     match stmt {
         Expression { value, .. } => create_equations_expression(value, equations),
+        Let {
+            name, expression, ..
+        } => {
+            equations.push(Equation::IsEqual(name.tpe(), expression.tpe()));
+            create_equations_expression(expression, equations);
+        }
         Block { statements, .. } => {
             for stmt in statements {
                 create_equations_statement(stmt, equations);
@@ -214,9 +248,19 @@ fn replace_rhs(eqs: &mut Equations, tid: TypeId, tpe: Type) {
     }
 }
 
+fn set_types_program(program: &mut Program, eqs: &Equations) {
+    for mut stmt in program.0.iter_mut() {
+        set_types_statement(&mut stmt, &eqs)
+    }
+}
+
 fn set_types_statement(stmt: &mut Statement, eqs: &Equations) {
     match stmt {
         Statement::Expression { value, .. } => set_types_expression(value, &eqs),
+        Statement::Let { name, expression } => {
+            set_unknown_tpe(&mut name.tpe, eqs);
+            set_types_expression(expression, eqs);
+        }
         Statement::Block { statements, .. } => {
             for stmt in statements {
                 set_types_statement(stmt, &eqs)
@@ -247,7 +291,7 @@ fn set_types_expression(exp: &mut Expression, eqs: &Equations) {
             set_types_expression(lhs, eqs);
             set_types_expression(rhs, eqs);
         }
-        Identifier { tpe, .. } => set_unknown_tpe(tpe, eqs),
+        Identifier(ident) => set_unknown_tpe(&mut ident.tpe, eqs),
         IntLiteral { .. } => {}
         BooleanLiteral { .. } => {}
         other => panic!("Unhandled expression in set_types {:?}", other),
@@ -289,6 +333,19 @@ mod tests {
     }
 
     #[test]
+    fn test_identifier_inference() {
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("let x = 5; x")).tpe()
+        );
+        assert!(false);
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("let x = false; x")).tpe()
+        );
+    }
+
+    #[test]
     fn test_if_inference() {
         match infer_expression("if (x == 5) { 5 + 5 } else { y }") {
             Expression::If {
@@ -307,12 +364,22 @@ mod tests {
     }
 
     fn infer_expression(input: &str) -> Expression {
-        let l = Lexer::new(input);
-        let mut p = Parser::new(l);
-        let statement = p.parse_program().unwrap().0.remove(0);
-        match infer_types(statement) {
-            Ok(Statement::Expression { value, .. }) => value,
+        let mut statements = infer_statement(input);
+        assert_eq!(1, statements.len());
+        match statements.remove(0) {
+            Statement::Expression { value, .. } => value,
             other => panic!("Expected expression, but got: {:?}", other),
         }
+    }
+
+    fn infer_statement(input: &str) -> Vec<Statement> {
+        let l = Lexer::new(input);
+        let mut p = Parser::new(l);
+        let program = p.parse_program().unwrap();
+        infer_types(*program).unwrap().0
+    }
+
+    fn last<X>(mut xs: Vec<X>) -> X {
+        xs.remove(xs.len() - 1)
     }
 }

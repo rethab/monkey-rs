@@ -1,5 +1,3 @@
-use crate::token;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeVariable {
     Known(Type),
@@ -46,23 +44,22 @@ pub trait Typed {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Let {
-        token: token::Token,
         name: Identifier,
         expression: Box<Expression>,
     },
     Return {
-        token: token::Token,
         value: Expression,
     },
     Expression {
-        token: token::Token,
         value: Expression,
     },
     Block {
-        token: token::Token,
         statements: Vec<Statement>,
     },
 }
+
+#[derive(Debug)]
+pub struct Program(pub Vec<Statement>);
 
 impl Typed for Statement {
     fn tpe(&self) -> TypeVariable {
@@ -85,7 +82,14 @@ impl Typed for Statement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identifier {
+    pub tpe: TypeVariable,
     pub value: String,
+}
+
+impl Typed for Identifier {
+    fn tpe(&self) -> TypeVariable {
+        self.tpe.clone()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,10 +121,7 @@ pub enum Expression {
         parameters: Vec<Identifier>,
         body: Box<Statement>,
     },
-    Identifier {
-        tpe: TypeVariable,
-        ident: Identifier,
-    },
+    Identifier(Identifier),
     Prefix {
         tpe: TypeVariable,
         op: String,
@@ -157,7 +158,7 @@ impl Typed for Expression {
             MapLiteral { tpe, .. } => tpe.clone(),
             Index { tpe, .. } => tpe.clone(),
             FunctionLiteral { tpe, .. } => tpe.clone(),
-            Identifier { tpe, .. } => tpe.clone(),
+            Identifier(ident) => ident.tpe.clone(),
             Prefix { tpe, .. } => tpe.clone(),
             Infix { tpe, .. } => tpe.clone(),
             If { tpe, .. } => tpe.clone(),
@@ -170,7 +171,6 @@ impl Typed for Expression {
 pub enum Function {
     Identifier(Identifier),
     Literal {
-        token: token::Token,
         parameters: Vec<Identifier>,
         body: Box<Statement>,
     },
