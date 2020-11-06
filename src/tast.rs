@@ -1,3 +1,6 @@
+use crate::ast;
+use std::collections::HashMap;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeVariable {
     Known(Type),
@@ -21,19 +24,21 @@ pub enum Type {
     Unit,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeId {
     x: i32,
 }
 
 impl TypeId {
-    pub fn new() -> Self {
-        Self { x: 0 }
-    }
-
     pub fn next(self) -> (Self, Self) {
         let next = Self { x: self.x + 1 };
         (self, next)
+    }
+}
+
+impl Default for TypeId {
+    fn default() -> Self {
+        Self { x: 0 }
     }
 }
 
@@ -182,3 +187,29 @@ pub enum Equation {
 }
 
 pub type Equations = Vec<Equation>;
+
+pub type Solutions = HashMap<TypeId, Type>;
+
+#[derive(Clone, Debug)]
+pub struct Identifiers {
+    values: HashMap<String, TypeVariable>,
+}
+
+impl Identifiers {
+    pub fn with(mut self, identifier: Identifier) -> Identifiers {
+        self.values.insert(identifier.value, identifier.tpe);
+        self
+    }
+
+    pub fn lookup(&self, identifier: &ast::Identifier) -> Option<TypeVariable> {
+        self.values.get(&identifier.value).cloned()
+    }
+}
+
+impl Default for Identifiers {
+    fn default() -> Self {
+        Self {
+            values: HashMap::new(),
+        }
+    }
+}

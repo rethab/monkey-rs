@@ -1,6 +1,7 @@
 use crate::ast;
 use crate::tast::TypeVariable::*;
 use crate::tast::{self, *};
+use std::collections::HashMap;
 
 pub fn infer_types(program: ast::Program) -> Result<Program, String> {
     let mut assignments = assign_types_program(program);
@@ -16,26 +17,32 @@ pub fn infer_types(program: ast::Program) -> Result<Program, String> {
 
 fn assign_types_program(program: ast::Program) -> Program {
     let mut stmts = Vec::new();
-    let mut next_id = TypeId::new();
+    let mut next_id = TypeId::default();
+    let mut ctx = Identifiers::default();
     for stmt in program.0 {
-        let (assigned, nxt_id) = assign_types_statement(stmt, next_id);
+        let (assigned, nxt_id, nxt_ctx) = assign_types_statement(stmt, next_id, ctx);
         stmts.push(assigned);
         next_id = nxt_id;
+        ctx = nxt_ctx;
     }
     Program(stmts)
 }
 
-fn assign_types_statement(stmt: ast::Statement, cur_id: TypeId) -> (Statement, TypeId) {
+fn assign_types_statement(
+    stmt: ast::Statement,
+    cur_id: TypeId,
+    ctx: Identifiers,
+) -> (Statement, TypeId, Identifiers) {
     use ast::Statement::*;
     match stmt {
         Expression { value, .. } => {
-            let (exp, next_id) = assign_types_expression(value, cur_id);
-            (Statement::Expression { value: exp }, next_id)
+            let (exp, next_id) = assign_types_expression(value, cur_id, ctx.clone());
+            (Statement::Expression { value: exp }, next_id, ctx)
         }
         Let {
             name, expression, ..
         } => {
-            let (exp, next_id) = assign_types_expression(*expression, cur_id);
+            let (exp, next_id) = assign_types_expression(*expression, cur_id, ctx.clone());
             let (ident_id, next_id) = next_id.next();
             let ident = Identifier {
                 tpe: Unknown(ident_id),
@@ -43,21 +50,24 @@ fn assign_types_statement(stmt: ast::Statement, cur_id: TypeId) -> (Statement, T
             };
             (
                 Statement::Let {
-                    name: ident,
+                    name: ident.clone(),
                     expression: Box::new(exp),
                 },
                 next_id,
+                ctx.with(ident),
             )
         }
         Block { statements, .. } => {
             let mut stmts = Vec::new();
             let mut next_id = cur_id;
+            let mut sub_ctx = ctx.clone();
             for stmt in statements {
-                let (assigned, nxt_id) = assign_types_statement(stmt, next_id);
+                let (assigned, nxt_id, next_ctx) = assign_types_statement(stmt, next_id, sub_ctx);
                 stmts.push(assigned);
                 next_id = nxt_id;
+                sub_ctx = next_ctx;
             }
-            (Statement::Block { statements: stmts }, next_id)
+            (Statement::Block { statements: stmts }, next_id, ctx)
         }
         other => panic!(
             "assign_types only handles Statement::Expression, given: {:?}",
@@ -66,42 +76,45 @@ fn assign_types_statement(stmt: ast::Statement, cur_id: TypeId) -> (Statement, T
     }
 }
 
-fn assign_types_expression(exp: ast::Expression, cur_id: TypeId) -> (Expression, TypeId) {
+fn assign_types_expression(
+    exp: ast::Expression,
+    cur_id: TypeId,
+    ctx: Identifiers,
+) -> (Expression, TypeId) {
     use ast::Expression::*;
     match exp {
         IntLiteral { value, .. } => (Expression::IntLiteral { value }, cur_id),
         StringLiteral { value, .. } => (Expression::StringLiteral { value }, cur_id),
         BooleanLiteral { value, .. } => (Expression::BooleanLiteral { value }, cur_id),
         Identifier(ident) => {
-            // TODO: identifiers only get a new id when they are introduced (parameter, let binding).
-            // otherwise they re-use it.
-            // this means we'll have to pass down a map?
-            let (id, next) = cur_id.next();
+            let tvar = ctx
+                .lookup(&ident)
+                .unwrap_or_else(|| panic!("Identifier {:?} not found in context", ident));
             (
                 Expression::Identifier(tast::Identifier {
-                    tpe: Unknown(id),
+                    tpe: tvar,
                     value: ident.value,
                 }),
-                next,
+                cur_id,
             )
         }
         Prefix { op, rhs, .. } => {
-            let (rhs_assigned, next_id) = assign_types_expression(*rhs, cur_id);
+            let (rhs_assigned, next_id) = assign_types_expression(*rhs, cur_id, ctx);
             let (id, next) = next_id.next();
             let infix = Expression::Prefix {
                 tpe: Unknown(id),
-                op: op,
+                op,
                 rhs: Box::new(rhs_assigned),
             };
             (infix, next)
         }
         Infix { op, rhs, lhs, .. } => {
-            let (lhs_assigned, next_id) = assign_types_expression(*lhs, cur_id);
-            let (rhs_assigned, next_id) = assign_types_expression(*rhs, next_id);
+            let (lhs_assigned, next_id) = assign_types_expression(*lhs, cur_id, ctx.clone());
+            let (rhs_assigned, next_id) = assign_types_expression(*rhs, next_id, ctx);
             let (id, next) = next_id.next();
             let infix = Expression::Infix {
                 tpe: Unknown(id),
-                op: op,
+                op,
                 lhs: Box::new(lhs_assigned),
                 rhs: Box::new(rhs_assigned),
             };
@@ -113,11 +126,11 @@ fn assign_types_expression(exp: ast::Expression, cur_id: TypeId) -> (Expression,
             alternative: mb_alt,
             ..
         } => {
-            let (cond_assigned, next_id) = assign_types_expression(*cond, cur_id);
-            let (then_assigned, next_id) = assign_types_statement(*then, next_id);
+            let (cond_assigned, next_id) = assign_types_expression(*cond, cur_id, ctx.clone());
+            let (then_assigned, next_id, _) = assign_types_statement(*then, next_id, ctx.clone());
             let (mb_alt_assigned, next_id) = match mb_alt {
                 Some(alt) => {
-                    let (a_s, next) = assign_types_statement(*alt, next_id);
+                    let (a_s, next, _) = assign_types_statement(*alt, next_id, ctx);
                     (Some(Box::new(a_s)), next)
                 }
                 None => (None, next_id),
@@ -169,9 +182,15 @@ fn create_equations_expression(exp: &Expression, equations: &mut Equations) {
         Infix {
             op, lhs, rhs, tpe, ..
         } => match op.as_str() {
-            "+" | "-" => {
+            "-" => {
                 equations.push(Equation::IsEqual(tpe.clone(), Known(Type::Int)));
                 equations.push(Equation::IsEqual(lhs.tpe(), rhs.tpe()));
+                create_equations_expression(lhs, equations);
+                create_equations_expression(rhs, equations);
+            }
+            "+" => {
+                equations.push(Equation::IsEqual(lhs.tpe(), rhs.tpe()));
+                equations.push(Equation::IsEqual(tpe.clone(), rhs.tpe()));
                 create_equations_expression(lhs, equations);
                 create_equations_expression(rhs, equations);
             }
@@ -204,57 +223,101 @@ fn create_equations_expression(exp: &Expression, equations: &mut Equations) {
         Identifier { .. } => {}
         IntLiteral { .. } => {}
         BooleanLiteral { .. } => {}
+        StringLiteral { .. } => {}
         other => panic!("Unhandled expression: {:?}", other),
     }
 }
 
-fn unify(mut eqs: Equations) -> Result<Equations, String> {
+fn unify(mut eqs: Equations) -> Result<Solutions, String> {
     use Equation::*;
 
-    let mut prev_known_rs = 0;
-    loop {
-        let known_rs: Vec<(TypeId, Type)> = eqs
-            .clone()
-            .into_iter()
-            .filter_map(|IsEqual(lhs, rhs)| {
-                if let (Unknown(l), Known(r)) = (lhs, rhs) {
-                    Some((l, r))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        if known_rs.len() <= prev_known_rs {
-            return Ok(eqs);
-        } else {
-            prev_known_rs = known_rs.len();
-        }
-
-        for (tid, tpe) in known_rs {
-            replace_rhs(&mut eqs, tid, tpe)
-        }
+    if eqs.is_empty() {
+        return Err("Nothing to unify".into());
     }
-}
 
-fn replace_rhs(eqs: &mut Equations, tid: TypeId, tpe: Type) {
-    use Equation::*;
-    for IsEqual(_, rhs) in eqs.iter_mut() {
-        if let Unknown(rhs_id) = rhs {
-            if rhs_id == &tid {
-                *rhs = Known(tpe.clone());
+    let mut solutions: HashMap<TypeId, Type> = HashMap::new();
+
+    let mut did_something = false;
+    let mut idx = 0;
+    loop {
+        match eqs.remove(idx) {
+            IsEqual(Known(lhs_tpe), Known(rhs_tpe)) => {
+                if lhs_tpe != rhs_tpe {
+                    return Err(format!("Cannot unify {:?} and {:?}", lhs_tpe, rhs_tpe));
+                }
+                did_something = true;
+            }
+            IsEqual(Unknown(tid), Known(tpe)) => {
+                if let Some(existing_sol) = solutions.get(&tid) {
+                    if *existing_sol != tpe {
+                        return Err(format!("Cannot unify {:?} and {:?}", existing_sol, tpe));
+                    }
+                }
+                solutions.insert(tid, tpe);
+                did_something = true;
+            }
+            IsEqual(Known(tpe), Unknown(tid)) => {
+                if let Some(existing_sol) = solutions.get(&tid) {
+                    if *existing_sol != tpe {
+                        return Err(format!("Cannot unify {:?} and {:?}", tpe, existing_sol));
+                    }
+                }
+                solutions.insert(tid, tpe);
+                did_something = true;
+            }
+            IsEqual(Unknown(lhs), Unknown(rhs)) => {
+                match (solutions.get(&lhs), solutions.get(&rhs)) {
+                    (Some(lhs_solution), None) => {
+                        let rhs_solution = lhs_solution.clone();
+                        solutions.insert(rhs, rhs_solution);
+                        did_something = true;
+                    }
+                    (None, Some(rhs_solution)) => {
+                        let lhs_solution = rhs_solution.clone();
+                        solutions.insert(lhs, lhs_solution);
+                        did_something = true;
+                    }
+                    (Some(lhs_solution), Some(rhs_solution)) => {
+                        if lhs_solution != rhs_solution {
+                            return Err(format!(
+                                "Cannot unify {:?} and {:?}",
+                                lhs_solution, rhs_solution
+                            ));
+                        }
+                        did_something = true;
+                    }
+                    (None, None) => {
+                        // hopefully we have more info in the next iteration
+                        // and can solve it then
+                        eqs.insert(idx, IsEqual(Unknown(lhs), Unknown(rhs)))
+                    }
+                }
             }
         }
+
+        if eqs.is_empty() {
+            return Ok(solutions);
+        }
+
+        idx += 1;
+        if idx >= eqs.len() {
+            if !did_something {
+                return Err("Cannot unify remaining equations".into());
+            } else {
+                did_something = false;
+            }
+            idx = 0;
+        }
     }
 }
 
-fn set_types_program(program: &mut Program, eqs: &Equations) {
+fn set_types_program(program: &mut Program, eqs: &Solutions) {
     for mut stmt in program.0.iter_mut() {
         set_types_statement(&mut stmt, &eqs)
     }
 }
 
-fn set_types_statement(stmt: &mut Statement, eqs: &Equations) {
+fn set_types_statement(stmt: &mut Statement, eqs: &Solutions) {
     match stmt {
         Statement::Expression { value, .. } => set_types_expression(value, &eqs),
         Statement::Let { name, expression } => {
@@ -270,7 +333,7 @@ fn set_types_statement(stmt: &mut Statement, eqs: &Equations) {
     }
 }
 
-fn set_types_expression(exp: &mut Expression, eqs: &Equations) {
+fn set_types_expression(exp: &mut Expression, eqs: &Solutions) {
     use Expression::*;
     match exp {
         If {
@@ -294,11 +357,12 @@ fn set_types_expression(exp: &mut Expression, eqs: &Equations) {
         Identifier(ident) => set_unknown_tpe(&mut ident.tpe, eqs),
         IntLiteral { .. } => {}
         BooleanLiteral { .. } => {}
+        StringLiteral { .. } => {}
         other => panic!("Unhandled expression in set_types {:?}", other),
     }
 }
 
-fn set_unknown_tpe(tpe: &mut TypeVariable, eqs: &Equations) {
+fn set_unknown_tpe(tpe: &mut TypeVariable, eqs: &Solutions) {
     match tpe {
         Unknown(tid) => {
             *tpe = Known(find_tpe_in_equations(&tid, eqs).expect("TypeId missing in Equations"))
@@ -307,15 +371,8 @@ fn set_unknown_tpe(tpe: &mut TypeVariable, eqs: &Equations) {
     }
 }
 
-fn find_tpe_in_equations(tid: &TypeId, eqs: &Equations) -> Option<Type> {
-    for Equation::IsEqual(lhs, rhs) in eqs.iter() {
-        if let (Unknown(l), Known(r)) = (lhs, rhs) {
-            if l == tid {
-                return Some(r.clone());
-            }
-        }
-    }
-    None
+fn find_tpe_in_equations(tid: &TypeId, eqs: &Solutions) -> Option<Type> {
+    eqs.get(tid).cloned()
 }
 
 #[cfg(test)]
@@ -326,10 +383,27 @@ mod tests {
 
     #[test]
     fn test_literal_inference() {
-        assert_eq!(Known(Type::Int), infer_expression("5").tpe());
-        assert_eq!(Known(Type::Int), infer_expression("5 + 5").tpe());
-        assert_eq!(Known(Type::Boolean), infer_expression("true").tpe());
-        assert_eq!(Known(Type::Boolean), infer_expression("5 == 5").tpe());
+        assert_eq!(
+            Known(Type::Int),
+            infer_expression("let x = 5 + 5; x", 1).tpe()
+        );
+        assert_eq!(Known(Type::Int), infer_expression("let x = 5; x", 1).tpe());
+        assert_eq!(
+            Known(Type::Boolean),
+            infer_expression("let x = true; x", 1).tpe()
+        );
+        assert_eq!(
+            Known(Type::Boolean),
+            infer_expression("let x = 5 == 5; x", 1).tpe()
+        );
+        assert_eq!(
+            Known(Type::String_),
+            infer_expression("let x = \"foo\"; x", 1).tpe()
+        );
+        assert_eq!(
+            Known(Type::String_),
+            infer_expression("let x = \"foo\"; x + \"bar\"", 1).tpe()
+        );
     }
 
     #[test]
@@ -338,16 +412,25 @@ mod tests {
             Known(Type::Int),
             last(infer_statement("let x = 5; x")).tpe()
         );
-        assert!(false);
         assert_eq!(
-            Known(Type::Int),
-            last(infer_statement("let x = false; x")).tpe()
+            Known(Type::Boolean),
+            last(infer_statement(
+                "let x = if (5 == 4) { 1==2 } else { false == true }; x"
+            ))
+            .tpe()
+        );
+        assert_eq!(
+            Known(Type::Boolean),
+            last(infer_statement(
+                "let x = if (5 == 4) { let y = \"foo\"; y == \"bar\" } else { false == true }; x"
+            ))
+            .tpe()
         );
     }
 
     #[test]
     fn test_if_inference() {
-        match infer_expression("if (x == 5) { 5 + 5 } else { y }") {
+        match infer_expression("let x = 3; let y = 1; if (x == 5) { 5 + 5 } else { y }", 2) {
             Expression::If {
                 tpe,
                 condition,
@@ -363,10 +446,25 @@ mod tests {
         }
     }
 
-    fn infer_expression(input: &str) -> Expression {
+    #[test]
+    fn test_errors() {
+        assert_eq!(
+            "Cannot unify Boolean and Int".to_string(),
+            infer_error("let x = false; let y = 5; x + y")
+        );
+        assert_eq!(
+            "Cannot unify Boolean and Int".to_string(),
+            infer_error("if (5 == 4) { 1 } else { false }")
+        );
+        assert_eq!(
+            "Cannot unify Int and String_".to_string(),
+            infer_error("let x = 5 + \"x\"; x")
+        );
+    }
+
+    fn infer_expression(input: &str, idx: usize) -> Expression {
         let mut statements = infer_statement(input);
-        assert_eq!(1, statements.len());
-        match statements.remove(0) {
+        match statements.remove(idx) {
             Statement::Expression { value, .. } => value,
             other => panic!("Expected expression, but got: {:?}", other),
         }
@@ -381,5 +479,12 @@ mod tests {
 
     fn last<X>(mut xs: Vec<X>) -> X {
         xs.remove(xs.len() - 1)
+    }
+
+    fn infer_error(input: &str) -> String {
+        let l = Lexer::new(input);
+        let mut p = Parser::new(l);
+        let program = p.parse_program().unwrap();
+        infer_types(*program).err().unwrap()
     }
 }
