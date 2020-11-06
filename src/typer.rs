@@ -45,7 +45,7 @@ fn assign_types_statement(
             let (exp, next_id) = assign_types_expression(*expression, cur_id, ctx.clone());
             let (ident_id, next_id) = next_id.next();
             let ident = Identifier {
-                tpe: Unknown(ident_id),
+                tpe: ident_id,
                 value: name.value,
             };
             (
@@ -58,15 +58,7 @@ fn assign_types_statement(
             )
         }
         Block { statements, .. } => {
-            let mut stmts = Vec::new();
-            let mut next_id = cur_id;
-            let mut sub_ctx = ctx.clone();
-            for stmt in statements {
-                let (assigned, nxt_id, next_ctx) = assign_types_statement(stmt, next_id, sub_ctx);
-                stmts.push(assigned);
-                next_id = nxt_id;
-                sub_ctx = next_ctx;
-            }
+            let (stmts, next_id) = assign_types_statements(statements, cur_id, ctx.clone());
             (Statement::Block { statements: stmts }, next_id, ctx)
         }
         other => panic!(
@@ -74,6 +66,23 @@ fn assign_types_statement(
             other
         ),
     }
+}
+
+fn assign_types_statements(
+    statements: Vec<ast::Statement>,
+    cur_id: TypeId,
+    ctx: Identifiers,
+) -> (Vec<tast::Statement>, TypeId) {
+    let mut stmts = Vec::new();
+    let mut next_id = cur_id;
+    let mut sub_ctx = ctx.clone();
+    for stmt in statements {
+        let (assigned, nxt_id, next_ctx) = assign_types_statement(stmt, next_id, sub_ctx);
+        stmts.push(assigned);
+        next_id = nxt_id;
+        sub_ctx = next_ctx;
+    }
+    (stmts, next_id)
 }
 
 fn assign_types_expression(
@@ -102,7 +111,7 @@ fn assign_types_expression(
             let (rhs_assigned, next_id) = assign_types_expression(*rhs, cur_id, ctx);
             let (id, next) = next_id.next();
             let infix = Expression::Prefix {
-                tpe: Unknown(id),
+                tpe: id,
                 op,
                 rhs: Box::new(rhs_assigned),
             };
@@ -113,7 +122,7 @@ fn assign_types_expression(
             let (rhs_assigned, next_id) = assign_types_expression(*rhs, next_id, ctx);
             let (id, next) = next_id.next();
             let infix = Expression::Infix {
-                tpe: Unknown(id),
+                tpe: id,
                 op,
                 lhs: Box::new(lhs_assigned),
                 rhs: Box::new(rhs_assigned),
@@ -137,15 +146,101 @@ fn assign_types_expression(
             };
             let (id, next) = next_id.next();
             let if_exp = Expression::If {
-                tpe: Unknown(id),
+                tpe: id,
                 condition: Box::new(cond_assigned),
                 consequence: Box::new(then_assigned),
                 alternative: mb_alt_assigned,
             };
             (if_exp, next)
         }
-        other => panic!("Unhandled expression: {:?}", other),
+        FunctionLiteral {
+            parameters, body, ..
+        } => {
+            let (parameters, body, next_id) =
+                assign_types_function_literal(parameters, *body, cur_id, ctx);
+            let (function_id, next_id) = next_id.next();
+            let function = Expression::FunctionLiteral {
+                return_type: function_id,
+                parameters,
+                body: Box::new(body),
+            };
+            (function, next_id)
+        }
+        Call {
+            function,
+            arguments,
+            ..
+        } => {
+            let (func, mut next_id) = match function {
+                ast::Function::Identifier(identifier) => {
+                    let (mut identifier, next_id) =
+                        assign_types_identifiers(vec![identifier].to_vec(), cur_id);
+                    (Function::Identifier(identifier.remove(0)), next_id)
+                }
+                ast::Function::Literal {
+                    parameters, body, ..
+                } => {
+                    let (parameters, body, next_id) =
+                        assign_types_function_literal(parameters, *body, cur_id, ctx.clone());
+                    let (function_id, next_id) = next_id.next();
+                    let func = Function::Literal {
+                        return_type: function_id,
+                        parameters,
+                        body: Box::new(body),
+                    };
+                    (func, next_id)
+                }
+            };
+
+            let mut args = Vec::new();
+            for argument in arguments {
+                let (arg, nxt_id) = assign_types_expression(argument, next_id, ctx.clone());
+                args.push(arg);
+                next_id = nxt_id;
+            }
+
+            let (call_id, next_id) = next_id.next();
+            let call = Expression::Call {
+                tpe: call_id,
+                function: func,
+                arguments: args,
+            };
+            (call, next_id)
+        }
+        other => panic!("assign_types_expression: Unhandled expression: {:?}", other),
     }
+}
+
+fn assign_types_function_literal(
+    parameters: Vec<ast::Identifier>,
+    body: ast::Statement,
+    cur_id: TypeId,
+    ctx: Identifiers,
+) -> (Vec<Identifier>, Statement, TypeId) {
+    let (params, next_id) = assign_types_identifiers(parameters, cur_id);
+    let statements = vec![body].to_vec();
+    let sub_ctx = ctx.with_all(params.clone());
+    let (mut stmts, next_id) = assign_types_statements(statements, next_id, sub_ctx.clone());
+
+    (params, stmts.remove(0), next_id)
+}
+
+fn assign_types_identifiers(
+    identifiers: Vec<ast::Identifier>,
+    cur_id: TypeId,
+) -> (Vec<Identifier>, TypeId) {
+    let mut next_id = cur_id;
+    let mut result = Vec::new();
+    for identifier in identifiers {
+        let (ident_id, nxt_id) = next_id.next();
+        let ident = tast::Identifier {
+            tpe: ident_id,
+            value: identifier.value,
+        };
+        next_id = nxt_id;
+        result.push(ident);
+    }
+    (result, next_id)
 }
 
 fn create_equations_program(program: &Program, equations: &mut Equations) {
@@ -220,11 +315,50 @@ fn create_equations_expression(exp: &Expression, equations: &mut Equations) {
                 create_equations_statement(alt, equations);
             }
         }
+        FunctionLiteral {
+            return_type, body, ..
+        } => {
+            equations.push(Equation::IsEqual(return_type.clone(), body.tpe()));
+            create_equations_statement(body, equations);
+        }
+        Call {
+            tpe,
+            function,
+            arguments,
+        } => {
+            equations.push(Equation::IsEqual(tpe.clone(), function.tpe()));
+            match function {
+                Function::Identifier(identifier) => {
+                    equations.push(Equation::IsEqual(identifier.tpe(), tpe.clone()));
+                    // TODO: lookup function and compare arguments
+                }
+                Function::Literal {
+                    return_type,
+                    parameters,
+                    body,
+                } => {
+                    equations.push(Equation::IsEqual(return_type.clone(), tpe.clone()));
+                    equations.push(Equation::IsEqual(return_type.clone(), body.tpe()));
+                    equations.push(Equation::IsEqual(body.tpe(), tpe.clone()));
+                    if arguments.len() != parameters.len() {
+                        return Err();
+                    }
+                    for (param, arg) in parameters.iter().zip(arguments.iter()) {
+                        equations.push(Equation::IsEqual(param.tpe(), arg.tpe()));
+                    }
+                }
+            }
+            // argument types have to be equal
+            create_equations_statement(body, equations);
+        }
         Identifier { .. } => {}
         IntLiteral { .. } => {}
         BooleanLiteral { .. } => {}
         StringLiteral { .. } => {}
-        other => panic!("Unhandled expression: {:?}", other),
+        other => panic!(
+            "create_equations_expression: Unhandled expression: {:?}",
+            other
+        ),
     }
 }
 
@@ -354,6 +488,12 @@ fn set_types_expression(exp: &mut Expression, eqs: &Solutions) {
             set_types_expression(lhs, eqs);
             set_types_expression(rhs, eqs);
         }
+        FunctionLiteral {
+            return_type, body, ..
+        } => {
+            set_unknown_tpe(return_type, eqs);
+            set_types_statement(body, eqs);
+        }
         Identifier(ident) => set_unknown_tpe(&mut ident.tpe, eqs),
         IntLiteral { .. } => {}
         BooleanLiteral { .. } => {}
@@ -429,6 +569,30 @@ mod tests {
     }
 
     #[test]
+    fn test_function_inference() {
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("fn(x) { x + 1 }")).tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("let double = fn(x) { x + x }; double(1)")).tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("fn(x) { x + x }(1)")).tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("let neg = fn(x) { x - (2 * x) }; neg(1)")).tpe()
+        );
+        assert_eq!(
+            Known(Type::String_),
+            last(infer_statement("fn(x, y) { x + y }(\"foo\", \"bar\");")).tpe()
+        );
+    }
+
+    #[test]
     fn test_if_inference() {
         match infer_expression("let x = 3; let y = 1; if (x == 5) { 5 + 5 } else { y }", 2) {
             Expression::If {
@@ -459,6 +623,10 @@ mod tests {
         assert_eq!(
             "Cannot unify Int and String_".to_string(),
             infer_error("let x = 5 + \"x\"; x")
+        );
+        assert_eq!(
+            "Wrong number of arguments".to_string(),
+            infer_error("let neg = fn(x) { x - (2 * x) }; neg(1, 2)")
         );
     }
 

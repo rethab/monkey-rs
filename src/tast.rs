@@ -30,9 +30,9 @@ pub struct TypeId {
 }
 
 impl TypeId {
-    pub fn next(self) -> (Self, Self) {
+    pub fn next(self) -> (TypeVariable, Self) {
         let next = Self { x: self.x + 1 };
-        (self, next)
+        (TypeVariable::Unknown(self), next)
     }
 }
 
@@ -122,7 +122,7 @@ pub enum Expression {
         index: Box<Expression>,
     },
     FunctionLiteral {
-        tpe: TypeVariable,
+        return_type: TypeVariable,
         parameters: Vec<Identifier>,
         body: Box<Statement>,
     },
@@ -162,7 +162,7 @@ impl Typed for Expression {
             ArrayLiteral { tpe, .. } => tpe.clone(),
             MapLiteral { tpe, .. } => tpe.clone(),
             Index { tpe, .. } => tpe.clone(),
-            FunctionLiteral { tpe, .. } => tpe.clone(),
+            FunctionLiteral { return_type, .. } => return_type.clone(),
             Identifier(ident) => ident.tpe.clone(),
             Prefix { tpe, .. } => tpe.clone(),
             Infix { tpe, .. } => tpe.clone(),
@@ -176,9 +176,20 @@ impl Typed for Expression {
 pub enum Function {
     Identifier(Identifier),
     Literal {
+        return_type: TypeVariable,
         parameters: Vec<Identifier>,
         body: Box<Statement>,
     },
+}
+
+impl Typed for Function {
+    fn tpe(&self) -> TypeVariable {
+        use Function::*;
+        match self {
+            Identifier(ident) => ident.tpe.clone(),
+            Literal { return_type, .. } => return_type.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -198,6 +209,13 @@ pub struct Identifiers {
 impl Identifiers {
     pub fn with(mut self, identifier: Identifier) -> Identifiers {
         self.values.insert(identifier.value, identifier.tpe);
+        self
+    }
+
+    pub fn with_all(mut self, identifiers: Vec<Identifier>) -> Identifiers {
+        for identifier in identifiers {
+            self = self.with(identifier)
+        }
         self
     }
 
