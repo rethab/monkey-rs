@@ -201,33 +201,46 @@ pub type Equations = Vec<Equation>;
 
 pub type Solutions = HashMap<TypeId, Type>;
 
+type Parameters = Vec<Identifier>;
+
 #[derive(Clone, Debug)]
-pub struct Identifiers {
-    values: HashMap<String, TypeVariable>,
+pub struct Context {
+    identifiers: HashMap<String, TypeVariable>,
+    functions: HashMap<String, Parameters>,
 }
 
-impl Identifiers {
-    pub fn with(mut self, identifier: Identifier) -> Identifiers {
-        self.values.insert(identifier.value, identifier.tpe);
+impl Context {
+    pub fn with_identifier(mut self, identifier: Identifier) -> Self {
+        self.identifiers.insert(identifier.value, identifier.tpe);
         self
     }
 
-    pub fn with_all(mut self, identifiers: Vec<Identifier>) -> Identifiers {
+    pub fn with_function(mut self, identifier: Identifier, parameters: Parameters) -> Self {
+        self.functions.insert(identifier.value, parameters);
+        self
+    }
+
+    pub fn with_all(mut self, identifiers: Vec<Identifier>) -> Self {
         for identifier in identifiers {
-            self = self.with(identifier)
+            self = self.with_identifier(identifier)
         }
         self
     }
 
-    pub fn lookup(&self, identifier: &ast::Identifier) -> Option<TypeVariable> {
-        self.values.get(&identifier.value).cloned()
+    pub fn lookup_identifier(&self, identifier: &ast::Identifier) -> Option<TypeVariable> {
+        self.identifiers.get(&identifier.value).cloned()
+    }
+
+    pub fn lookup_function(&self, identifier: &Identifier) -> Option<Parameters> {
+        self.functions.get(&identifier.value).cloned()
     }
 }
 
-impl Default for Identifiers {
+impl Default for Context {
     fn default() -> Self {
         Self {
-            values: HashMap::new(),
+            identifiers: HashMap::new(),
+            functions: HashMap::new(),
         }
     }
 }

@@ -3,11 +3,13 @@ use crate::tast::TypeVariable::*;
 use crate::tast::{self, *};
 use std::collections::HashMap;
 
+type EquationsResult<T> = Result<T, String>;
+
 pub fn infer_types(program: ast::Program) -> Result<Program, String> {
     let mut assignments = assign_types_program(program);
     println!("Assignments: {:?}", assignments);
     let mut equations = Vec::new();
-    create_equations_program(&assignments, &mut equations);
+    create_equations_program(&assignments, &mut equations, ctx)?;
     println!("Equations: {:?}", equations);
     let solutions = unify(equations)?;
     println!("Solutions: {:?}", solutions);
@@ -18,7 +20,7 @@ pub fn infer_types(program: ast::Program) -> Result<Program, String> {
 fn assign_types_program(program: ast::Program) -> Program {
     let mut stmts = Vec::new();
     let mut next_id = TypeId::default();
-    let mut ctx = Identifiers::default();
+    let mut ctx = Context::default();
     for stmt in program.0 {
         let (assigned, nxt_id, nxt_ctx) = assign_types_statement(stmt, next_id, ctx);
         stmts.push(assigned);
@@ -31,8 +33,8 @@ fn assign_types_program(program: ast::Program) -> Program {
 fn assign_types_statement(
     stmt: ast::Statement,
     cur_id: TypeId,
-    ctx: Identifiers,
-) -> (Statement, TypeId, Identifiers) {
+    ctx: Context,
+) -> (Statement, TypeId, Context) {
     use ast::Statement::*;
     match stmt {
         Expression { value, .. } => {
@@ -48,13 +50,20 @@ fn assign_types_statement(
                 tpe: ident_id,
                 value: name.value,
             };
+
+            let next_ctx = if let tast::Expression::FunctionLiteral { parameters, .. } = exp {
+                ctx.with_function(ident.clone(), parameters.clone())
+            } else {
+                ctx
+            };
+
             (
                 Statement::Let {
                     name: ident.clone(),
                     expression: Box::new(exp),
                 },
                 next_id,
-                ctx.with(ident),
+                next_ctx.with_identifier(ident),
             )
         }
         Block { statements, .. } => {
@@ -71,7 +80,7 @@ fn assign_types_statement(
 fn assign_types_statements(
     statements: Vec<ast::Statement>,
     cur_id: TypeId,
-    ctx: Identifiers,
+    ctx: Context,
 ) -> (Vec<tast::Statement>, TypeId) {
     let mut stmts = Vec::new();
     let mut next_id = cur_id;
@@ -88,7 +97,7 @@ fn assign_types_statements(
 fn assign_types_expression(
     exp: ast::Expression,
     cur_id: TypeId,
-    ctx: Identifiers,
+    ctx: Context,
 ) -> (Expression, TypeId) {
     use ast::Expression::*;
     match exp {
@@ -97,7 +106,7 @@ fn assign_types_expression(
         BooleanLiteral { value, .. } => (Expression::BooleanLiteral { value }, cur_id),
         Identifier(ident) => {
             let tvar = ctx
-                .lookup(&ident)
+                .lookup_identifier(&ident)
                 .unwrap_or_else(|| panic!("Identifier {:?} not found in context", ident));
             (
                 Expression::Identifier(tast::Identifier {
@@ -215,7 +224,7 @@ fn assign_types_function_literal(
     parameters: Vec<ast::Identifier>,
     body: ast::Statement,
     cur_id: TypeId,
-    ctx: Identifiers,
+    ctx: Context,
 ) -> (Vec<Identifier>, Statement, TypeId) {
     let (params, next_id) = assign_types_identifiers(parameters, cur_id);
     let statements = vec![body].to_vec();
@@ -243,26 +252,41 @@ fn assign_types_identifiers(
     (result, next_id)
 }
 
-fn create_equations_program(program: &Program, equations: &mut Equations) {
+fn create_equations_program(
+    program: &Program,
+    equations: &mut Equations,
+    ctx: Context,
+) -> EquationsResult<()> {
     for stmt in program.0.iter() {
-        create_equations_statement(&stmt, equations);
+        create_equations_statement(&stmt, equations, ctx)?;
     }
+    Ok(())
 }
 
-fn create_equations_statement(stmt: &Statement, equations: &mut Equations) {
+fn create_equations_statement(
+    stmt: &Statement,
+    equations: &mut Equations,
+    ctx: Context,
+) -> EquationsResult<Context> {
     use Statement::*;
     match stmt {
-        Expression { value, .. } => create_equations_expression(value, equations),
+        Expression { value, .. } => {
+            create_equations_expression(value, equations, ctx.clone())?;
+            Ok(ctx)
+        }
         Let {
             name, expression, ..
         } => {
             equations.push(Equation::IsEqual(name.tpe(), expression.tpe()));
-            create_equations_expression(expression, equations);
+            create_equations_expression(expression, equations, ctx.clone())?;
+            Ok(ctx)
         }
         Block { statements, .. } => {
+            let mut next_ctx = ctx;
             for stmt in statements {
-                create_equations_statement(stmt, equations);
+                next_ctx = create_equations_statement(stmt, equations, next_ctx)?;
             }
+            Ok(next_ctx)
         }
         other => panic!(
             "create_equations only handles Statement::Expression, given: {:?}",
@@ -271,29 +295,33 @@ fn create_equations_statement(stmt: &Statement, equations: &mut Equations) {
     }
 }
 
-fn create_equations_expression(exp: &Expression, equations: &mut Equations) {
+fn create_equations_expression(
+    exp: &Expression,
+    equations: &mut Equations,
+    ctx: Context,
+) -> EquationsResult<()> {
     use Expression::*;
     match exp {
         Infix {
             op, lhs, rhs, tpe, ..
         } => match op.as_str() {
-            "-" => {
+            "-" | "*" | "/" => {
                 equations.push(Equation::IsEqual(tpe.clone(), Known(Type::Int)));
                 equations.push(Equation::IsEqual(lhs.tpe(), rhs.tpe()));
-                create_equations_expression(lhs, equations);
-                create_equations_expression(rhs, equations);
+                create_equations_expression(lhs, equations, ctx)?;
+                create_equations_expression(rhs, equations, ctx)
             }
             "+" => {
                 equations.push(Equation::IsEqual(lhs.tpe(), rhs.tpe()));
                 equations.push(Equation::IsEqual(tpe.clone(), rhs.tpe()));
-                create_equations_expression(lhs, equations);
-                create_equations_expression(rhs, equations);
+                create_equations_expression(lhs, equations, ctx)?;
+                create_equations_expression(rhs, equations, ctx)
             }
             "==" => {
                 equations.push(Equation::IsEqual(tpe.clone(), Known(Type::Boolean)));
                 equations.push(Equation::IsEqual(lhs.tpe(), rhs.tpe()));
-                create_equations_expression(lhs, equations);
-                create_equations_expression(rhs, equations);
+                create_equations_expression(lhs, equations, ctx)?;
+                create_equations_expression(rhs, equations, ctx)
             }
             other => panic!("Unhandled operation: {:?}", other),
         },
@@ -306,20 +334,21 @@ fn create_equations_expression(exp: &Expression, equations: &mut Equations) {
         } => {
             equations.push(Equation::IsEqual(cond.tpe(), Known(Type::Boolean)));
             equations.push(Equation::IsEqual(tpe.clone(), then.tpe()));
-            create_equations_expression(cond, equations);
-            create_equations_statement(then, equations);
+            create_equations_expression(cond, equations, ctx)?;
+            create_equations_statement(then, equations, ctx)?;
 
             if let Some(alt) = mb_alt {
                 equations.push(Equation::IsEqual(tpe.clone(), alt.tpe()));
                 equations.push(Equation::IsEqual(alt.tpe(), then.tpe()));
-                create_equations_statement(alt, equations);
+                create_equations_statement(alt, equations, ctx)?;
             }
+            Ok(())
         }
         FunctionLiteral {
             return_type, body, ..
         } => {
             equations.push(Equation::IsEqual(return_type.clone(), body.tpe()));
-            create_equations_statement(body, equations);
+            create_equations_statement(body, equations, ctx).map(|_| ())
         }
         Call {
             tpe,
@@ -330,7 +359,22 @@ fn create_equations_expression(exp: &Expression, equations: &mut Equations) {
             match function {
                 Function::Identifier(identifier) => {
                     equations.push(Equation::IsEqual(identifier.tpe(), tpe.clone()));
-                    // TODO: lookup function and compare arguments
+                    if let Some(parameters) = ctx.lookup_function(&identifier) {
+                        if arguments.len() != parameters.len() {
+                            return Err(format!(
+                                "Function {} takes {} parameters, but {} given",
+                                identifier.value,
+                                arguments.len(),
+                                parameters.len()
+                            ));
+                        }
+                        for (param, arg) in parameters.iter().zip(arguments.iter()) {
+                            equations.push(Equation::IsEqual(param.tpe(), arg.tpe()));
+                        }
+                        Ok(())
+                    } else {
+                        Err(format!("Function {} not found", identifier.value))
+                    }
                 }
                 Function::Literal {
                     return_type,
@@ -341,20 +385,23 @@ fn create_equations_expression(exp: &Expression, equations: &mut Equations) {
                     equations.push(Equation::IsEqual(return_type.clone(), body.tpe()));
                     equations.push(Equation::IsEqual(body.tpe(), tpe.clone()));
                     if arguments.len() != parameters.len() {
-                        return Err();
+                        return Err(format!(
+                            "Function <anonymous> takes {} parameters, but {} given",
+                            arguments.len(),
+                            parameters.len()
+                        ));
                     }
                     for (param, arg) in parameters.iter().zip(arguments.iter()) {
                         equations.push(Equation::IsEqual(param.tpe(), arg.tpe()));
                     }
+                    Ok(())
                 }
             }
-            // argument types have to be equal
-            create_equations_statement(body, equations);
         }
-        Identifier { .. } => {}
-        IntLiteral { .. } => {}
-        BooleanLiteral { .. } => {}
-        StringLiteral { .. } => {}
+        Identifier { .. } => Ok(()),
+        IntLiteral { .. } => Ok(()),
+        BooleanLiteral { .. } => Ok(()),
+        StringLiteral { .. } => Ok(()),
         other => panic!(
             "create_equations_expression: Unhandled expression: {:?}",
             other
@@ -572,11 +619,11 @@ mod tests {
     fn test_function_inference() {
         assert_eq!(
             Known(Type::Int),
-            last(infer_statement("fn(x) { x + 1 }")).tpe()
+            last(infer_statement("let double = fn(x) { x + x }; double(1)")).tpe()
         );
         assert_eq!(
             Known(Type::Int),
-            last(infer_statement("let double = fn(x) { x + x }; double(1)")).tpe()
+            last(infer_statement("fn(x) { x + 1 }")).tpe()
         );
         assert_eq!(
             Known(Type::Int),
