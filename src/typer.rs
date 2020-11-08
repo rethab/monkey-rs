@@ -75,10 +75,13 @@ fn assign_types_statement(
                 assign_types_statements(statements, equations, cur_id, ctx.clone())?;
             Ok((Statement::Block { statements: stmts }, next_id, ctx))
         }
-        other => panic!(
-            "assign_types only handles Statement::Expression, given: {:?}",
-            other
-        ),
+        Return {
+            value: expression, ..
+        } => {
+            let (exp, next_id) =
+                assign_types_expression(expression, equations, cur_id, ctx.clone())?;
+            Ok((Statement::Return { value: exp }, next_id, ctx))
+        }
     }
 }
 
@@ -91,9 +94,15 @@ fn assign_types_statements(
     let mut stmts = Vec::new();
     let mut next_id = cur_id;
     let mut sub_ctx = ctx;
-    for stmt in statements {
+    let size = statements.len();
+    for (index, stmt) in statements.into_iter().enumerate() {
         let (assigned, nxt_id, next_ctx) =
             assign_types_statement(stmt, equations, next_id, sub_ctx)?;
+        if let Statement::Return { .. } = assigned {
+            if index < size - 1 {
+                return Err(format!("Unreachable statement(s) after return"));
+            }
+        }
         stmts.push(assigned);
         next_id = nxt_id;
         sub_ctx = next_ctx;
@@ -427,7 +436,7 @@ fn set_types_statement(stmt: &mut Statement, eqs: &Solutions) {
                 set_types_statement(stmt, &eqs)
             }
         }
-        other => panic!("Unhandled statement in set_types {:?}", other),
+        Statement::Return { value, .. } => set_types_expression(value, &eqs),
     }
 }
 
@@ -581,6 +590,33 @@ mod tests {
     }
 
     #[test]
+    fn test_return_inference() {
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("fn(x) { return x + 1 }")).tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("let double = fn() { return 1; }; double()")).tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("fn(x) { return x + x }(1)")).tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("fn(x) { let y = x + x; return y }(1)")).tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement(
+                "let neg = fn(x) { return x - (2 * x) }; neg(1)"
+            ))
+            .tpe()
+        );
+    }
+
+    #[test]
     fn test_if_inference() {
         match infer_expression("let x = 3; let y = 1; if (x == 5) { 5 + 5 } else { y }", 2) {
             Expression::If {
@@ -615,6 +651,14 @@ mod tests {
         assert_eq!(
             "Function neg takes 2 parameters, but 1 given".to_string(),
             infer_error("let neg = fn(x) { x - (2 * x) }; neg(1, 2)")
+        );
+        assert_eq!(
+            "Cannot unify Int and String_".to_string(),
+            infer_error("let neg = fn(x) { x - (2 * x) }; neg(\"foo\")")
+        );
+        assert_eq!(
+            "Unreachable statement(s) after return".to_string(),
+            infer_error("fn() { return 1; 2 }()")
         );
     }
 
