@@ -100,7 +100,7 @@ fn assign_types_statements(
             assign_types_statement(stmt, equations, next_id, sub_ctx)?;
         if let Statement::Return { .. } = assigned {
             if index < size - 1 {
-                return Err(format!("Unreachable statement(s) after return"));
+                return Err("Unreachable statement(s) after return".to_string());
             }
         }
         stmts.push(assigned);
@@ -134,15 +134,40 @@ fn assign_types_expression(
                 cur_id,
             ))
         }
+        ArrayLiteral { values, .. } => {
+            let mut vals = Vec::new();
+            let mut next_id = cur_id;
+            for value in values {
+                let (val, nxt_id) =
+                    assign_types_expression(value, equations, next_id, ctx.clone())?;
+                vals.push(val);
+                next_id = nxt_id;
+            }
+
+            let (element_type, next_id) = next_id.next();
+
+            let mut prev_elem = element_type.clone();
+            for val in vals.iter() {
+                equations.push(Equation::IsEqual(prev_elem.clone(), val.tpe()));
+                prev_elem = val.tpe();
+            }
+
+            let array = Expression::ArrayLiteral {
+                tpe: element_type,
+                values: vals,
+            };
+
+            Ok((array, next_id))
+        }
         Prefix { op, rhs, .. } => {
             let (rhs_assigned, next_id) = assign_types_expression(*rhs, equations, cur_id, ctx)?;
-            let (id, next) = next_id.next();
+            let (id, next_id) = next_id.next();
             let infix = Expression::Prefix {
                 tpe: id,
                 op,
                 rhs: Box::new(rhs_assigned),
             };
-            Ok((infix, next))
+            Ok((infix, next_id))
         }
         Infix { op, rhs, lhs, .. } => {
             let (lhs_assigned, next_id) =
@@ -222,6 +247,25 @@ fn assign_types_expression(
                 body: Box::new(body),
             };
             Ok((function, next_id))
+        }
+        Index {
+            container, index, ..
+        } => {
+            let (cont, next_id) =
+                assign_types_expression(*container, equations, cur_id, ctx.clone())?;
+            let (idx, next_id) = assign_types_expression(*index, equations, next_id, ctx)?;
+            let (array_value_type, next_id) = next_id.next();
+
+            equations.push(Equation::IsEqual(cont.tpe(), array_value_type.clone()));
+            equations.push(Equation::IsEqual(idx.tpe(), Known(Type::Int)));
+
+            let index = Expression::Index {
+                tpe: array_value_type,
+                container: Box::new(cont),
+                index: Box::new(idx),
+            };
+
+            Ok((index, next_id))
         }
         Call {
             function,
@@ -467,6 +511,21 @@ fn set_types_expression(exp: &mut Expression, eqs: &Solutions) {
             set_tpe(return_type, eqs);
             set_types_statement(body, eqs);
         }
+        ArrayLiteral { tpe, values, .. } => {
+            set_tpe(tpe, eqs);
+            for value in values {
+                set_types_expression(value, eqs);
+            }
+        }
+        Index {
+            tpe,
+            container,
+            index,
+        } => {
+            set_tpe(tpe, eqs);
+            set_types_expression(container, eqs);
+            set_types_expression(index, eqs);
+        }
         Call {
             tpe,
             arguments,
@@ -632,6 +691,59 @@ mod tests {
             }
             other => panic!("Expected int expression, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_array_inference() {
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("let xs = [1, 2, 3]; xs[0]")).tpe()
+        );
+        assert_eq!(
+            Known(Type::String_),
+            last(infer_statement("let xs = [\"foo\"]; xs[0]")).tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("fn(xs) { xs[1] }([1, 2])")).tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement(
+                "let index = fn(xs, i) { xs[i] }; index([1], 0)"
+            ))
+            .tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement(
+                "let nested = fn(xs, ys, i) { xs[ys[i]] }; nested([0], [0], 0)"
+            ))
+            .tpe()
+        );
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement("fn(xs, i) { xs[i + i] }([1, 2, 3], 1)")).tpe()
+        );
+        assert_eq!(
+            Known(Type::String_),
+            last(infer_statement(
+                "let s = \"x\"; let index = fn(xs, i) { xs[i] }; let xs = []; index(xs, 0) + s"
+            ))
+            .tpe()
+        );
+        assert_eq!(
+            "Cannot unify String_ and Int".to_string(),
+            infer_error("let xs = [1]; xs[\"x\"]")
+        );
+        assert_eq!(
+            "Cannot unify Int and String_".to_string(),
+            infer_error("fn(xs, s) { xs[s] }([1], \"x\")")
+        );
+        assert_eq!(
+            "Cannot unify Int and Boolean".to_string(),
+            infer_error("let xs = [1, 1 == 1]; ")
+        );
     }
 
     #[test]
