@@ -202,11 +202,12 @@ pub type Equations = Vec<Equation>;
 pub type Solutions = HashMap<TypeId, Type>;
 
 type Parameters = Vec<Identifier>;
+type ReturnType = TypeVariable;
 
 #[derive(Clone, Debug)]
 pub struct Context {
     identifiers: HashMap<String, TypeVariable>,
-    functions: HashMap<String, Parameters>,
+    functions: HashMap<String, (Parameters, ReturnType)>,
 }
 
 impl Context {
@@ -216,7 +217,8 @@ impl Context {
     }
 
     pub fn with_function(mut self, identifier: Identifier, parameters: Parameters) -> Self {
-        self.functions.insert(identifier.value, parameters);
+        self.functions
+            .insert(identifier.value, (parameters, identifier.tpe));
         self
     }
 
@@ -231,7 +233,7 @@ impl Context {
         self.identifiers.get(&identifier.value).cloned()
     }
 
-    pub fn lookup_function(&self, identifier: &Identifier) -> Option<Parameters> {
+    pub fn lookup_function(&self, identifier: &Identifier) -> Option<(Parameters, ReturnType)> {
         self.functions.get(&identifier.value).cloned()
     }
 }

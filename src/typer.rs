@@ -3,8 +3,6 @@ use crate::tast::TypeVariable::*;
 use crate::tast::{self, *};
 use std::collections::HashMap;
 
-type EquationsResult<T> = Result<T, String>;
-
 pub fn infer_types(program: ast::Program) -> Result<Program, String> {
     let mut equations = Vec::new();
     let mut assignments = assign_types_program(program, &mut equations)?;
@@ -42,7 +40,6 @@ fn assign_types_statement(
     match stmt {
         Expression { value, .. } => {
             let (exp, next_id) = assign_types_expression(value, equations, cur_id, ctx.clone())?;
-            create_equations_expression(&exp, equations, ctx.clone())?;
             Ok((Statement::Expression { value: exp }, next_id, ctx))
         }
         Let {
@@ -56,14 +53,13 @@ fn assign_types_statement(
                 value: name.value,
             };
 
-            let next_ctx = if let tast::Expression::FunctionLiteral { parameters, .. } = exp {
+            let next_ctx = if let tast::Expression::FunctionLiteral { parameters, .. } = &exp {
                 ctx.with_function(ident.clone(), parameters.clone())
             } else {
                 ctx
             };
 
             equations.push(Equation::IsEqual(ident.tpe(), exp.tpe()));
-            create_equations_expression(&exp, equations, ctx.clone())?;
 
             Ok((
                 Statement::Let {
@@ -94,7 +90,7 @@ fn assign_types_statements(
 ) -> Result<(Vec<tast::Statement>, TypeId), String> {
     let mut stmts = Vec::new();
     let mut next_id = cur_id;
-    let mut sub_ctx = ctx.clone();
+    let mut sub_ctx = ctx;
     for stmt in statements {
         let (assigned, nxt_id, next_ctx) =
             assign_types_statement(stmt, equations, next_id, sub_ctx)?;
@@ -143,33 +139,30 @@ fn assign_types_expression(
             let (lhs_assigned, next_id) =
                 assign_types_expression(*lhs, equations, cur_id, ctx.clone())?;
             let (rhs_assigned, next_id) = assign_types_expression(*rhs, equations, next_id, ctx)?;
-            let (tpe, next) = next_id.next();
+            let (infix_type, next) = next_id.next();
+            match op.as_str() {
+                "-" | "*" | "/" => {
+                    equations.push(Equation::IsEqual(infix_type.clone(), Known(Type::Int)));
+                    equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
+                }
+                "+" => {
+                    equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
+                    equations.push(Equation::IsEqual(infix_type.clone(), rhs_assigned.tpe()));
+                }
+                "==" => {
+                    equations.push(Equation::IsEqual(infix_type.clone(), Known(Type::Boolean)));
+                    equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
+                }
+                other => {
+                    return Err(format!("Unhandled infix operator: {}", other));
+                }
+            }
             let infix = Expression::Infix {
-                tpe,
+                tpe: infix_type,
                 op,
                 lhs: Box::new(lhs_assigned),
                 rhs: Box::new(rhs_assigned),
             };
-            match op.as_str() {
-                "-" | "*" | "/" => {
-                    equations.push(Equation::IsEqual(tpe.clone(), Known(Type::Int)));
-                    equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
-                    create_equations_expression(&lhs_assigned, equations, ctx)?;
-                    create_equations_expression(&rhs_assigned, equations, ctx)?;
-                }
-                "+" => {
-                    equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
-                    equations.push(Equation::IsEqual(tpe.clone(), rhs_assigned.tpe()));
-                    create_equations_expression(&lhs_assigned, equations, ctx)?;
-                    create_equations_expression(&rhs_assigned, equations, ctx)?;
-                }
-                "==" => {
-                    equations.push(Equation::IsEqual(tpe.clone(), Known(Type::Boolean)));
-                    equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
-                    create_equations_expression(&lhs_assigned, equations, ctx)?;
-                    create_equations_expression(&rhs_assigned, equations, ctx)?;
-                }
-            }
             Ok((infix, next))
         }
         If {
@@ -194,7 +187,7 @@ fn assign_types_expression(
             equations.push(Equation::IsEqual(cond_assigned.tpe(), Known(Type::Boolean)));
             equations.push(Equation::IsEqual(tpe.clone(), then_assigned.tpe()));
 
-            if let Some(alt_assigned) = mb_alt_assigned {
+            if let Some(alt_assigned) = mb_alt_assigned.as_ref() {
                 equations.push(Equation::IsEqual(tpe.clone(), alt_assigned.tpe()));
                 equations.push(Equation::IsEqual(alt_assigned.tpe(), then_assigned.tpe()));
             }
@@ -213,7 +206,7 @@ fn assign_types_expression(
             let (parameters, body, next_id) =
                 assign_types_function_literal(parameters, equations, *body, cur_id, ctx)?;
             let (function_id, next_id) = next_id.next();
-            equations.push(Equation::IsEqual(function_id, body.tpe()));
+            equations.push(Equation::IsEqual(function_id.clone(), body.tpe()));
             let function = Expression::FunctionLiteral {
                 return_type: function_id,
                 parameters,
@@ -226,31 +219,7 @@ fn assign_types_expression(
             arguments,
             ..
         } => {
-            let (func, mut next_id) = match function {
-                ast::Function::Identifier(identifier) => {
-                    let (mut identifier, next_id) =
-                        assign_types_identifiers(vec![identifier].to_vec(), cur_id);
-                    (Function::Identifier(identifier.remove(0)), next_id)
-                }
-                ast::Function::Literal {
-                    parameters, body, ..
-                } => {
-                    let (parameters, body, next_id) = assign_types_function_literal(
-                        parameters,
-                        equations,
-                        *body,
-                        cur_id,
-                        ctx.clone(),
-                    )?;
-                    let (function_id, next_id) = next_id.next();
-                    let func = Function::Literal {
-                        return_type: function_id,
-                        parameters,
-                        body: Box::new(body),
-                    };
-                    (func, next_id)
-                }
-            };
+            let (call_type, mut next_id) = cur_id.next();
 
             let mut args = Vec::new();
             for argument in arguments {
@@ -260,9 +229,61 @@ fn assign_types_expression(
                 next_id = nxt_id;
             }
 
-            let (call_id, next_id) = next_id.next();
+            let (func, next_id) = match function {
+                ast::Function::Identifier(identifier) => {
+                    let (mut identifiers, next_id) =
+                        assign_types_identifiers(vec![identifier].to_vec(), next_id);
+                    let identifier = identifiers.remove(0);
+                    equations.push(Equation::IsEqual(identifier.tpe(), call_type.clone()));
+
+                    if let Some((parameters, return_type)) = ctx.lookup_function(&identifier) {
+                        if args.len() != parameters.len() {
+                            return Err(format!(
+                                "Function {} takes {} parameters, but {} given",
+                                identifier.value,
+                                args.len(),
+                                parameters.len()
+                            ));
+                        }
+                        equations.push(Equation::IsEqual(call_type.clone(), return_type));
+                        for (param, arg) in parameters.iter().zip(args.iter()) {
+                            equations.push(Equation::IsEqual(param.tpe(), arg.tpe()));
+                        }
+                        (Function::Identifier(identifier), next_id)
+                    } else {
+                        return Err(format!("Function {} not found", identifier.value));
+                    }
+                }
+                ast::Function::Literal {
+                    parameters, body, ..
+                } => {
+                    let (parameters, body, next_id) =
+                        assign_types_function_literal(parameters, equations, *body, next_id, ctx)?;
+                    let (function_type, next_id) = next_id.next();
+                    equations.push(Equation::IsEqual(function_type.clone(), call_type.clone()));
+                    equations.push(Equation::IsEqual(function_type.clone(), body.tpe()));
+                    equations.push(Equation::IsEqual(body.tpe(), call_type.clone()));
+                    if args.len() != parameters.len() {
+                        return Err(format!(
+                            "Function <anonymous> takes {} parameters, but {} given",
+                            args.len(),
+                            parameters.len()
+                        ));
+                    }
+                    for (param, arg) in parameters.iter().zip(args.iter()) {
+                        equations.push(Equation::IsEqual(param.tpe(), arg.tpe()));
+                    }
+                    let func = Function::Literal {
+                        return_type: function_type,
+                        parameters,
+                        body: Box::new(body),
+                    };
+                    (func, next_id)
+                }
+            };
+
             let call = Expression::Call {
-                tpe: call_id,
+                tpe: call_type,
                 function: func,
                 arguments: args,
             };
@@ -282,8 +303,7 @@ fn assign_types_function_literal(
     let (params, next_id) = assign_types_identifiers(parameters, cur_id);
     let statements = vec![body].to_vec();
     let sub_ctx = ctx.with_all(params.clone());
-    let (mut stmts, next_id) =
-        assign_types_statements(statements, equations, next_id, sub_ctx.clone())?;
+    let (mut stmts, next_id) = assign_types_statements(statements, equations, next_id, sub_ctx)?;
 
     Ok((params, stmts.remove(0), next_id))
 }
@@ -304,69 +324,6 @@ fn assign_types_identifiers(
         result.push(ident);
     }
     (result, next_id)
-}
-
-fn create_equations_expression(
-    exp: &Expression,
-    equations: &mut Equations,
-    ctx: Context,
-) -> EquationsResult<()> {
-    use Expression::*;
-    match exp {
-        Call {
-            tpe,
-            function,
-            arguments,
-        } => {
-            this needs to be integrated into the type_assign block above
-            equations.push(Equation::IsEqual(tpe.clone(), function.tpe()));
-            match function {
-                Function::Identifier(identifier) => {
-                    equations.push(Equation::IsEqual(identifier.tpe(), tpe.clone()));
-                    if let Some(parameters) = ctx.lookup_function(&identifier) {
-                        if arguments.len() != parameters.len() {
-                            return Err(format!(
-                                "Function {} takes {} parameters, but {} given",
-                                identifier.value,
-                                arguments.len(),
-                                parameters.len()
-                            ));
-                        }
-                        for (param, arg) in parameters.iter().zip(arguments.iter()) {
-                            equations.push(Equation::IsEqual(param.tpe(), arg.tpe()));
-                        }
-                        Ok(())
-                    } else {
-                        Err(format!("Function {} not found", identifier.value))
-                    }
-                }
-                Function::Literal {
-                    return_type,
-                    parameters,
-                    body,
-                } => {
-                    equations.push(Equation::IsEqual(return_type.clone(), tpe.clone()));
-                    equations.push(Equation::IsEqual(return_type.clone(), body.tpe()));
-                    equations.push(Equation::IsEqual(body.tpe(), tpe.clone()));
-                    if arguments.len() != parameters.len() {
-                        return Err(format!(
-                            "Function <anonymous> takes {} parameters, but {} given",
-                            arguments.len(),
-                            parameters.len()
-                        ));
-                    }
-                    for (param, arg) in parameters.iter().zip(arguments.iter()) {
-                        equations.push(Equation::IsEqual(param.tpe(), arg.tpe()));
-                    }
-                    Ok(())
-                }
-            }
-        }
-        other => panic!(
-            "create_equations_expression: Unhandled expression: {:?}",
-            other
-        ),
-    }
 }
 
 fn unify(mut eqs: Equations) -> Result<Solutions, String> {
@@ -462,7 +419,7 @@ fn set_types_statement(stmt: &mut Statement, eqs: &Solutions) {
     match stmt {
         Statement::Expression { value, .. } => set_types_expression(value, &eqs),
         Statement::Let { name, expression } => {
-            set_unknown_tpe(&mut name.tpe, eqs);
+            set_tpe(&mut name.tpe, eqs);
             set_types_expression(expression, eqs);
         }
         Statement::Block { statements, .. } => {
@@ -483,7 +440,7 @@ fn set_types_expression(exp: &mut Expression, eqs: &Solutions) {
             consequence,
             alternative,
         } => {
-            set_unknown_tpe(tpe, eqs);
+            set_tpe(tpe, eqs);
             set_types_expression(condition, eqs);
             set_types_statement(consequence, eqs);
             if let Some(alt) = alternative {
@@ -491,17 +448,41 @@ fn set_types_expression(exp: &mut Expression, eqs: &Solutions) {
             }
         }
         Infix { tpe, lhs, rhs, .. } => {
-            set_unknown_tpe(tpe, eqs);
+            set_tpe(tpe, eqs);
             set_types_expression(lhs, eqs);
             set_types_expression(rhs, eqs);
         }
         FunctionLiteral {
             return_type, body, ..
         } => {
-            set_unknown_tpe(return_type, eqs);
+            set_tpe(return_type, eqs);
             set_types_statement(body, eqs);
         }
-        Identifier(ident) => set_unknown_tpe(&mut ident.tpe, eqs),
+        Call {
+            tpe,
+            arguments,
+            function,
+        } => {
+            set_tpe(tpe, eqs);
+            for arg in arguments {
+                set_types_expression(arg, eqs);
+            }
+            match function {
+                Function::Identifier(ident) => set_tpe(&mut ident.tpe, eqs),
+                Function::Literal {
+                    return_type,
+                    parameters,
+                    body,
+                } => {
+                    set_tpe(return_type, eqs);
+                    for param in parameters {
+                        set_tpe(&mut param.tpe, eqs);
+                    }
+                    set_types_statement(body, eqs);
+                }
+            }
+        }
+        Identifier(ident) => set_tpe(&mut ident.tpe, eqs),
         IntLiteral { .. } => {}
         BooleanLiteral { .. } => {}
         StringLiteral { .. } => {}
@@ -509,7 +490,7 @@ fn set_types_expression(exp: &mut Expression, eqs: &Solutions) {
     }
 }
 
-fn set_unknown_tpe(tpe: &mut TypeVariable, eqs: &Solutions) {
+fn set_tpe(tpe: &mut TypeVariable, eqs: &Solutions) {
     match tpe {
         Unknown(tid) => {
             *tpe = Known(find_tpe_in_equations(&tid, eqs).expect("TypeId missing in Equations"))
@@ -632,7 +613,7 @@ mod tests {
             infer_error("let x = 5 + \"x\"; x")
         );
         assert_eq!(
-            "Wrong number of arguments".to_string(),
+            "Function neg takes 2 parameters, but 1 given".to_string(),
             infer_error("let neg = fn(x) { x - (2 * x) }; neg(1, 2)")
         );
     }
