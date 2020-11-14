@@ -351,7 +351,7 @@ fn assign_types_expression(
             };
             Ok((call, next_id))
         }
-        other => panic!("assign_types_expression: Unhandled expression: {:?}", other),
+        MapLiteral { .. } => panic!("Maps are currentlyy not typed"),
     }
 }
 
@@ -567,7 +567,7 @@ fn set_types_expression(exp: &mut Expression, eqs: &Solutions) {
         IntLiteral { .. } => {}
         BooleanLiteral { .. } => {}
         StringLiteral { .. } => {}
-        other => panic!("Unhandled expression in set_types {:?}", other),
+        MapLiteral { .. } => panic!("Maps are currently not typed :("),
     }
 }
 
