@@ -1,5 +1,6 @@
 use crate::ast;
 use std::collections::HashMap;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeVariable {
@@ -182,6 +183,24 @@ pub enum Function {
     },
 }
 
+impl Into<Expression> for Function {
+    fn into(self) -> Expression {
+        use Function::*;
+        match self {
+            Identifier(ident) => Expression::Identifier(ident),
+            Literal {
+                return_type,
+                parameters,
+                body,
+            } => Expression::FunctionLiteral {
+                return_type,
+                parameters,
+                body,
+            },
+        }
+    }
+}
+
 impl Typed for Function {
     fn tpe(&self) -> TypeVariable {
         use Function::*;
@@ -244,5 +263,125 @@ impl Default for Context {
             identifiers: HashMap::new(),
             functions: HashMap::new(),
         }
+    }
+}
+
+impl fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for stmt in self.0.iter() {
+            write!(f, "{}", stmt)?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Statement::Let {
+                name, expression, ..
+            } => write!(f, "let {} = {}", name, expression),
+            Statement::Return { value, .. } => write!(f, "return {};", value),
+            Statement::Expression { value, .. } => write!(f, "{}", value),
+            Statement::Block { statements, .. } => {
+                for stmt in statements {
+                    write!(f, "{}", stmt)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expression::IntLiteral { value, .. } => write!(f, "{}", value),
+            Expression::BooleanLiteral { value, .. } => write!(f, "{}", value),
+            Expression::StringLiteral { value, .. } => write!(f, "{}", value),
+            Expression::ArrayLiteral { values, .. } => {
+                write!(f, "[")?;
+                let mut first = true;
+                for value in values {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", value)?;
+                }
+                write!(f, "]")
+            }
+            Expression::MapLiteral { values, .. } => {
+                write!(f, "{{")?;
+                let mut first = true;
+                for (key, value) in values {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", key, value)?;
+                }
+                write!(f, "}}")
+            }
+            Expression::Index {
+                container, index, ..
+            } => write!(f, "({}[{}])", container, index),
+            Expression::FunctionLiteral {
+                parameters, body, ..
+            } => {
+                write!(f, "fn(")?;
+                let mut first = true;
+                for parameter in parameters {
+                    if !first {
+                        write!(f, ", ")?;
+                    } else {
+                        first = false
+                    }
+                    write!(f, "{}", parameter)?;
+                }
+                write!(f, ") {}", body)
+            }
+            Expression::Identifier(ident) => write!(f, "{}", ident),
+            Expression::Prefix { op, rhs, .. } => write!(f, "({}{})", op, rhs),
+            Expression::Infix { op, lhs, rhs, .. } => write!(f, "({} {} {})", lhs, op, rhs),
+            Expression::If {
+                condition,
+                consequence,
+                alternative: Some(alternative),
+                ..
+            } => write!(f, "if {} {} else {}", condition, consequence, alternative),
+            Expression::If {
+                condition,
+                consequence,
+                alternative: None,
+                ..
+            } => write!(f, "if {} {}", condition, consequence),
+            Expression::Call {
+                function,
+                arguments,
+                ..
+            } => {
+                write!(f, "{}", Into::<Expression>::into(function.clone()))?;
+                write!(f, "(")?;
+                let mut first = true;
+                for argument in arguments {
+                    if first {
+                        first = false
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", argument)?;
+                }
+                write!(f, ")")
+            }
+        }
+    }
+}
+
+impl fmt::Display for Identifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
     }
 }

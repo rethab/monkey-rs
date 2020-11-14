@@ -167,6 +167,10 @@ fn assign_types_expression(
                     equations.push(Equation::IsEqual(infix_tpe.clone(), Known(Type::Boolean)));
                     equations.push(Equation::IsEqual(rhs_assigned.tpe(), Known(Type::Boolean)));
                 }
+                "-" => {
+                    equations.push(Equation::IsEqual(infix_tpe.clone(), Known(Type::Int)));
+                    equations.push(Equation::IsEqual(rhs_assigned.tpe(), Known(Type::Int)));
+                }
                 other => {
                     panic!("Unhandled prefix op {}", other);
                 }
@@ -188,11 +192,15 @@ fn assign_types_expression(
                     equations.push(Equation::IsEqual(infix_type.clone(), Known(Type::Int)));
                     equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
                 }
+                ">" | "<" => {
+                    equations.push(Equation::IsEqual(infix_type.clone(), Known(Type::Boolean)));
+                    equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
+                }
                 "+" => {
                     equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
                     equations.push(Equation::IsEqual(infix_type.clone(), rhs_assigned.tpe()));
                 }
-                "==" => {
+                "==" | "!=" => {
                     equations.push(Equation::IsEqual(infix_type.clone(), Known(Type::Boolean)));
                     equations.push(Equation::IsEqual(lhs_assigned.tpe(), rhs_assigned.tpe()));
                 }
@@ -392,7 +400,7 @@ fn unify(mut eqs: Equations) -> Result<Solutions, String> {
     use Equation::*;
 
     if eqs.is_empty() {
-        return Err("Nothing to unify".into());
+        return Ok(HashMap::new());
     }
 
     let mut solutions: HashMap<TypeId, Type> = HashMap::new();
@@ -650,6 +658,17 @@ mod tests {
 
     #[test]
     fn test_function_inference() {
+        assert_eq!(
+            Known(Type::Int),
+            last(infer_statement(
+                "let newAdder = fn(x) {
+                    fn(y) { x + y};
+                 };
+                 let addTwo = newAdder(2);
+                 addTwo(2); "
+            ))
+            .tpe()
+        );
         assert_eq!(
             Known(Type::Int),
             last(infer_statement("let double = fn(x) { x + x }; double(1)")).tpe()

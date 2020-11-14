@@ -1,5 +1,5 @@
-use super::ast;
 use super::environment::Environment;
+use super::tast;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -15,8 +15,8 @@ pub enum Object {
     Null,
     Return(Box<Object>),
     Function {
-        parameters: Vec<ast::Identifier>,
-        body: Box<ast::Statement>,
+        parameters: Vec<tast::Identifier>,
+        body: Box<tast::Statement>,
         env: Rc<RefCell<Environment>>,
     },
     Builtin {
