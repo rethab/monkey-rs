@@ -161,9 +161,18 @@ fn assign_types_expression(
         }
         Prefix { op, rhs, .. } => {
             let (rhs_assigned, next_id) = assign_types_expression(*rhs, equations, cur_id, ctx)?;
-            let (id, next_id) = next_id.next();
+            let (infix_tpe, next_id) = next_id.next();
+            match op.as_str() {
+                "!" => {
+                    equations.push(Equation::IsEqual(infix_tpe.clone(), Known(Type::Boolean)));
+                    equations.push(Equation::IsEqual(rhs_assigned.tpe(), Known(Type::Boolean)));
+                }
+                other => {
+                    panic!("Unhandled prefix op {}", other);
+                }
+            }
             let infix = Expression::Prefix {
-                tpe: id,
+                tpe: infix_tpe,
                 op,
                 rhs: Box::new(rhs_assigned),
             };
@@ -505,6 +514,10 @@ fn set_types_expression(exp: &mut Expression, eqs: &Solutions) {
             set_types_expression(lhs, eqs);
             set_types_expression(rhs, eqs);
         }
+        Prefix { tpe, rhs, .. } => {
+            set_tpe(tpe, eqs);
+            set_types_expression(rhs, eqs);
+        }
         FunctionLiteral {
             return_type, body, ..
         } => {
@@ -561,7 +574,10 @@ fn set_types_expression(exp: &mut Expression, eqs: &Solutions) {
 fn set_tpe(tpe: &mut TypeVariable, eqs: &Solutions) {
     match tpe {
         Unknown(tid) => {
-            *tpe = Known(find_tpe_in_equations(&tid, eqs).expect("TypeId missing in Equations"))
+            *tpe = Known(
+                find_tpe_in_equations(&tid, eqs)
+                    .expect(&format!("TypeId {:?} missing in Equations", tid)),
+            )
         }
         Known(..) => {}
     }
@@ -599,6 +615,14 @@ mod tests {
         assert_eq!(
             Known(Type::String_),
             infer_expression("let x = \"foo\"; x + \"bar\"", 1).tpe()
+        );
+    }
+
+    #[test]
+    fn test_infix_inference() {
+        assert_eq!(
+            Known(Type::Boolean),
+            infer_expression("let x = true; !x", 1).tpe()
         );
     }
 
