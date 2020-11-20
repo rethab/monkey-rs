@@ -33,8 +33,7 @@ impl Compiler {
                 self.compile_expression(*rhs)?;
                 match op.as_str() {
                     "+" => {
-                        self.emit(OP_ADD, &vec![])?;
-                        ()
+                        self.emit(OP_ADD, &[])?;
                     }
                     other => unimplemented!("compile_expression/op: {}", other),
                 }
@@ -42,7 +41,7 @@ impl Compiler {
             ast::Expression::IntLiteral { value, .. } => {
                 let int = object::Object::Integer(value as i64);
                 let pos = self.add_constant(int);
-                self.emit(OP_CONSTANT, &vec![pos])?;
+                self.emit(OP_CONSTANT, &[pos])?;
             }
             other => unimplemented!("compile_expression: {:?}", other),
         }
