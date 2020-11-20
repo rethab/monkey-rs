@@ -7,20 +7,61 @@ struct Compiler {
     constants: Vec<object::Object>,
 }
 
-struct Bytecode {
-    instructions: Instructions,
-    constants: Vec<object::Object>,
+struct Bytecode<'a> {
+    instructions: &'a Instructions,
+    constants: &'a Vec<object::Object>,
 }
 
+type CompileResult<T> = Result<T, String>;
+
 impl Compiler {
-    pub fn compile(&self, p: ast::Program) -> Result<(), String> {
+    pub fn compile(&mut self, p: ast::Program) -> CompileResult<()> {
+        for stmt in p.0 {
+            match stmt {
+                ast::Statement::Expression { value, .. } => self.compile_expression(value)?,
+                other => unimplemented!("compile: {:?}", other),
+            }
+        }
         Ok(())
+    }
+
+    fn compile_expression(&mut self, exp: ast::Expression) -> CompileResult<()> {
+        match exp {
+            ast::Expression::Infix { op, lhs, rhs, .. } => {
+                self.compile_expression(*lhs)?;
+                // TODO something with op
+                self.compile_expression(*rhs)
+            }
+            ast::Expression::IntLiteral { value, .. } => {
+                let int = object::Object::Integer(value as i64);
+                let pos = self.add_constant(int);
+                self.emit(OP_CONSTANT, &vec![pos]);
+                Ok(())
+            }
+            other => unimplemented!("compile_expression: {:?}", other),
+        }
+    }
+
+    fn emit(&mut self, op: Opcode, operands: &[i32]) -> CompileResult<i32> {
+        let instruction = make(op, operands)?;
+        Ok(self.add_instruction(&instruction))
+    }
+
+    fn add_instruction(&mut self, ins: &[u8]) -> i32 {
+        let pos = self.instructions.len();
+        self.instructions.extend(ins);
+        pos as i32
+    }
+
+    fn add_constant(&mut self, obj: object::Object) -> i32 {
+        self.constants.push(obj);
+        (self.constants.len() - 1) as i32
     }
 
     fn bytecode(&self) -> Bytecode {
         Bytecode {
-            instructions: self.instructions.clone(),
-            constants: self.constants.clone(),
+            instructions: &self.instructions,
+            constants: &self.constants,
         }
     }
 }
@@ -59,7 +100,7 @@ mod tests {
         expected_instructions: Vec<Instructions>,
     ) -> Result<(), String> {
         let p = *Parser::new(Lexer::new(input)).parse_program().unwrap();
-        let c = Compiler::default();
+        let mut c = Compiler::default();
 
         c.compile(p)?;
         let bytecode = c.bytecode();
@@ -71,14 +112,15 @@ mod tests {
 
     fn test_instructions(
         expected_instructions: Vec<Instructions>,
-        actual: Instructions,
+        actual: &Instructions,
     ) -> Result<(), String> {
-        let concatted = flatten(expected_instructions);
+        let concatted = flatten(expected_instructions.clone());
 
         if concatted.len() != actual.len() {
             return Err(format!(
                 "wrong instructions length. expected={:?}, actual={:?}",
-                concatted, actual
+                display_instructions(expected_instructions),
+                actual
             ));
         }
 
@@ -86,7 +128,9 @@ mod tests {
             if actual[i] != *instr {
                 return Err(format!(
                     "wrong instruction at {}. expected={:?}, actual={:?}",
-                    i, concatted, actual
+                    i,
+                    display_instructions(expected_instructions),
+                    actual
                 ));
             }
         }
@@ -96,7 +140,7 @@ mod tests {
 
     fn test_constants(
         expected: Vec<object::Object>,
-        actual: Vec<object::Object>,
+        actual: &Vec<object::Object>,
     ) -> Result<(), String> {
         if expected.len() != actual.len() {
             return Err(format!(

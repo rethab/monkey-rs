@@ -1,5 +1,5 @@
 pub type Instructions = Vec<u8>;
-type Opcode = u8;
+pub type Opcode = u8;
 
 pub const OP_CONSTANT: Opcode = 0x00;
 
@@ -51,7 +51,7 @@ fn read_bigendian(vs: &[u8], offset: usize) -> u16 {
     ((vs[offset] as u16) << 8) | vs[offset + 1] as u16
 }
 
-fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
+pub fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
     let mut result = String::new();
     let mut offset = 0;
     for instr in instructions {
@@ -60,10 +60,8 @@ fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
         }
         result.push_str(&format!("{:0width$} ", offset, width = 4));
 
-        let def = lookup_definition(instr[0]).expect(&format!(
-            "Definition for instruction {} not found",
-            instr[0]
-        ));
+        let def = lookup_definition(instr[0])
+            .unwrap_or_else(|_| panic!("Definition for instruction {} not found", instr[0]));
 
         result.push_str(def.name);
 
@@ -114,5 +112,21 @@ mod tests {
         .replace("            ", "");
 
         assert_eq!(expected, display_instructions(instructions));
+    }
+
+    #[test]
+    fn test_read_big_endian() {
+        let mut xs = vec![1, 0, 0, 0];
+        assert_eq!(push_and_read(&mut xs, 0, 1), 1);
+        assert_eq!(push_and_read(&mut xs, 0, 10000), 10000);
+        assert_eq!(push_and_read(&mut xs, 1, 1), 1);
+        assert_eq!(push_and_read(&mut xs, 1, 10000), 10000);
+        assert_eq!(push_and_read(&mut xs, 2, 1), 1);
+        assert_eq!(push_and_read(&mut xs, 2, 10000), 10000);
+    }
+
+    fn push_and_read(vs: &mut [u8], offset: usize, v: u16) -> u16 {
+        push_bigendian(vs, offset, v);
+        read_bigendian(vs, offset)
     }
 }
