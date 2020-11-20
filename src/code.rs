@@ -7,6 +7,9 @@ pub type Instructions = Vec<u8>;
 pub enum Op {
     Constant,
     Add,
+    Sub,
+    Mul,
+    Div,
     Pop,
 }
 
@@ -23,6 +26,9 @@ impl TryFrom<u8> for Op {
         match v {
             x if x == Op::Constant as u8 => Ok(Op::Constant),
             x if x == Op::Add as u8 => Ok(Op::Add),
+            x if x == Op::Sub as u8 => Ok(Op::Sub),
+            x if x == Op::Mul as u8 => Ok(Op::Mul),
+            x if x == Op::Div as u8 => Ok(Op::Div),
             x if x == Op::Pop as u8 => Ok(Op::Pop),
             other => Err(format!("Not an op code: {}", other)),
         }
@@ -71,6 +77,18 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpAdd",
                 operand_widths: vec![],
             },
+            Mul => Definition {
+                name: "OpMul",
+                operand_widths: vec![],
+            },
+            Sub => Definition {
+                name: "OpSub",
+                operand_widths: vec![],
+            },
+            Div => Definition {
+                name: "OpDiv",
+                operand_widths: vec![],
+            },
             Pop => Definition {
                 name: "OpPop",
                 operand_widths: vec![],
@@ -110,6 +128,9 @@ pub fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
         match op {
             Op::Constant => result.push_str(&format!(" {}", read_bigendian(&instr, 1))),
             Op::Add => {}
+            Op::Sub => {}
+            Op::Mul => {}
+            Op::Div => {}
             Op::Pop => {}
         }
 
@@ -132,6 +153,9 @@ mod tests {
                 vec![Op::Constant.byte(), 255, 254],
             ),
             (Op::Add, vec![], vec![Op::Add.byte()]),
+            (Op::Sub, vec![], vec![Op::Sub.byte()]),
+            (Op::Mul, vec![], vec![Op::Mul.byte()]),
+            (Op::Div, vec![], vec![Op::Div.byte()]),
         ];
 
         for (op, operands, expected) in tests {
@@ -155,6 +179,10 @@ mod tests {
             make(Op::Add, &vec![]).unwrap(),
             make(Op::Constant, &vec![2]).unwrap(),
             make(Op::Constant, &vec![65535]).unwrap(),
+            make(Op::Sub, &vec![]).unwrap(),
+            make(Op::Mul, &vec![]).unwrap(),
+            make(Op::Div, &vec![]).unwrap(),
+            make(Op::Pop, &vec![]).unwrap(),
         ];
 
         let expected = "
@@ -162,6 +190,10 @@ mod tests {
             0003 OpAdd
             0004 OpConstant 2
             0007 OpConstant 65535
+            0010 OpSub
+            0011 OpMul
+            0012 OpDiv
+            0013 OpPop
         "
         .trim()
         .replace("            ", "");

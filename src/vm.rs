@@ -67,16 +67,36 @@ impl<'a> Vm<'a> {
 
                     i += 2;
                 }
-                Add => {
-                    let a = self.stack_pop_int()?;
-                    let b = self.stack_pop_int()?;
-                    self.stack.push(object::Object::Integer(a + b));
+                Add | Sub | Mul | Div => {
+                    self.run_binary_op(op)?;
                 }
                 Pop => {
                     self.stack.pop()?;
                 }
             }
         }
+        Ok(())
+    }
+
+    fn run_binary_op(&mut self, op: Op) -> Result<(), String> {
+        let b = self.stack_pop_int()?;
+        let a = self.stack_pop_int()?;
+        use Op::*;
+        match op {
+            Add => {
+                self.stack.push(object::Object::Integer(a + b));
+            }
+            Sub => {
+                self.stack.push(object::Object::Integer(a - b));
+            }
+            Mul => {
+                self.stack.push(object::Object::Integer(a * b));
+            }
+            Div => {
+                self.stack.push(object::Object::Integer(a / b));
+            }
+            other => panic!("Not a binary op: {:?}", other),
+        };
         Ok(())
     }
 
@@ -103,7 +123,13 @@ mod tests {
     fn test_integer_arithmetic() -> Result<(), String> {
         run_vm_test("1", int(1))?;
         run_vm_test("2", int(2))?;
-        run_vm_test("1 + 2", int(3))
+        run_vm_test("1 + 2", int(3))?;
+        run_vm_test("1 - 2", int(-1))?;
+        run_vm_test("2 * 2", int(4))?;
+        run_vm_test("4 / 2", int(2))?;
+        run_vm_test("4 / 2 + 2", int(4))?;
+        run_vm_test("5 * (2 + 10)", int(60))?;
+        run_vm_test("50 / 2 * 2 + 10 - 5", int(55))
     }
 
     fn run_vm_test(input: &str, expected: object::Object) -> Result<(), String> {

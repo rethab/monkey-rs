@@ -38,6 +38,15 @@ impl Compiler {
                     "+" => {
                         self.emit(Op::Add, &[])?;
                     }
+                    "-" => {
+                        self.emit(Op::Sub, &[])?;
+                    }
+                    "*" => {
+                        self.emit(Op::Mul, &[])?;
+                    }
+                    "/" => {
+                        self.emit(Op::Div, &[])?;
+                    }
                     other => unimplemented!("compile_expression/op: {}", other),
                 }
             }
