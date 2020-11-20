@@ -2,10 +2,12 @@ pub type Instructions = Vec<u8>;
 pub type Opcode = u8;
 
 pub const OP_CONSTANT: Opcode = 0x00;
+pub const OP_ADD: Opcode = 0x01;
 
-struct Definition<'a> {
+#[derive(Debug)]
+pub struct Definition<'a> {
     name: &'a str,
-    operand_widths: Vec<i32>,
+    pub operand_widths: Vec<i32>,
 }
 
 pub fn make(op: Opcode, operands: &[i32]) -> Result<Vec<u8>, String> {
@@ -32,11 +34,15 @@ pub fn make(op: Opcode, operands: &[i32]) -> Result<Vec<u8>, String> {
     Ok(instruction)
 }
 
-fn lookup_definition<'a>(op: u8) -> Result<Definition<'a>, String> {
+pub fn lookup_definition<'a>(op: u8) -> Result<Definition<'a>, String> {
     match op {
         OP_CONSTANT => Ok(Definition {
             name: "OpConstant",
             operand_widths: vec![2],
+        }),
+        OP_ADD => Ok(Definition {
+            name: "OpAdd",
+            operand_widths: vec![],
         }),
         unknown => Err(format!("opcode {} undefined", unknown)),
     }
@@ -47,7 +53,7 @@ fn push_bigendian(vs: &mut [u8], offset: usize, v: u16) {
     vs[offset + 1] = (v & 0x00FF) as u8;
 }
 
-fn read_bigendian(vs: &[u8], offset: usize) -> u16 {
+pub fn read_bigendian(vs: &[u8], offset: usize) -> u16 {
     ((vs[offset] as u16) << 8) | vs[offset + 1] as u16
 }
 
@@ -65,7 +71,11 @@ pub fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
 
         result.push_str(def.name);
 
-        result.push_str(&format!(" {}", read_bigendian(&instr, 1)));
+        match instr[0] {
+            OP_CONSTANT => result.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+            OP_ADD => {}
+            other => unimplemented!("display_instructions: {:?}", other),
+        }
 
         offset += instr.len();
     }
@@ -79,7 +89,10 @@ mod tests {
 
     #[test]
     fn test_make() {
-        let tests = vec![(OP_CONSTANT, vec![65534], vec![OP_CONSTANT, 255, 254])];
+        let tests = vec![
+            (OP_CONSTANT, vec![65534], vec![OP_CONSTANT, 255, 254]),
+            (OP_ADD, vec![], vec![OP_ADD]),
+        ];
 
         for (op, operands, expected) in tests {
             let instruction = make(op, &operands).expect(&format!(
@@ -99,14 +112,16 @@ mod tests {
     fn test_instructions_string() {
         let instructions = vec![
             make(OP_CONSTANT, &vec![1]).unwrap(),
+            make(OP_ADD, &vec![]).unwrap(),
             make(OP_CONSTANT, &vec![2]).unwrap(),
             make(OP_CONSTANT, &vec![65535]).unwrap(),
         ];
 
         let expected = "
             0000 OpConstant 1
-            0003 OpConstant 2
-            0006 OpConstant 65535
+            0003 OpAdd
+            0004 OpConstant 2
+            0007 OpConstant 65535
         "
         .trim()
         .replace("            ", "");

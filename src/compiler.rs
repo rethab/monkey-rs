@@ -2,14 +2,15 @@ use crate::ast;
 use crate::code::*;
 use crate::object;
 
-struct Compiler {
+pub struct Compiler {
     instructions: Instructions,
     constants: Vec<object::Object>,
 }
 
-struct Bytecode<'a> {
-    instructions: &'a Instructions,
-    constants: &'a Vec<object::Object>,
+#[derive(Clone)]
+pub struct Bytecode<'a> {
+    pub instructions: &'a Instructions,
+    pub constants: &'a Vec<object::Object>,
 }
 
 type CompileResult<T> = Result<T, String>;
@@ -29,17 +30,23 @@ impl Compiler {
         match exp {
             ast::Expression::Infix { op, lhs, rhs, .. } => {
                 self.compile_expression(*lhs)?;
-                // TODO something with op
-                self.compile_expression(*rhs)
+                self.compile_expression(*rhs)?;
+                match op.as_str() {
+                    "+" => {
+                        self.emit(OP_ADD, &vec![])?;
+                        ()
+                    }
+                    other => unimplemented!("compile_expression/op: {}", other),
+                }
             }
             ast::Expression::IntLiteral { value, .. } => {
                 let int = object::Object::Integer(value as i64);
                 let pos = self.add_constant(int);
-                self.emit(OP_CONSTANT, &vec![pos]);
-                Ok(())
+                self.emit(OP_CONSTANT, &vec![pos])?;
             }
             other => unimplemented!("compile_expression: {:?}", other),
         }
+        Ok(())
     }
 
     fn emit(&mut self, op: Opcode, operands: &[i32]) -> CompileResult<i32> {
@@ -58,7 +65,7 @@ impl Compiler {
         (self.constants.len() - 1) as i32
     }
 
-    fn bytecode(&self) -> Bytecode {
+    pub fn bytecode(&self) -> Bytecode {
         Bytecode {
             instructions: &self.instructions,
             constants: &self.constants,
@@ -90,6 +97,7 @@ mod tests {
             vec![
                 make(OP_CONSTANT, &vec![0]).unwrap(),
                 make(OP_CONSTANT, &vec![1]).unwrap(),
+                make(OP_ADD, &vec![]).unwrap(),
             ],
         )
     }
