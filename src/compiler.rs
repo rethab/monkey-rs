@@ -33,7 +33,7 @@ impl Compiler {
                 self.compile_expression(*rhs)?;
                 match op.as_str() {
                     "+" => {
-                        self.emit(OP_ADD, &[])?;
+                        self.emit(Op::Add, &[])?;
                     }
                     other => unimplemented!("compile_expression/op: {}", other),
                 }
@@ -41,14 +41,14 @@ impl Compiler {
             ast::Expression::IntLiteral { value, .. } => {
                 let int = object::Object::Integer(value as i64);
                 let pos = self.add_constant(int);
-                self.emit(OP_CONSTANT, &[pos])?;
+                self.emit(Op::Constant, &[pos])?;
             }
             other => unimplemented!("compile_expression: {:?}", other),
         }
         Ok(())
     }
 
-    fn emit(&mut self, op: Opcode, operands: &[i32]) -> CompileResult<i32> {
+    fn emit(&mut self, op: Op, operands: &[i32]) -> CompileResult<i32> {
         let instruction = make(op, operands)?;
         Ok(self.add_instruction(&instruction))
     }
@@ -94,9 +94,9 @@ mod tests {
             "1 + 2",
             vec![int(1), int(2)],
             vec![
-                make(OP_CONSTANT, &vec![0]).unwrap(),
-                make(OP_CONSTANT, &vec![1]).unwrap(),
-                make(OP_ADD, &vec![]).unwrap(),
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Add, &vec![]).unwrap(),
             ],
         )
     }

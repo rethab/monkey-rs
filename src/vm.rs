@@ -2,6 +2,8 @@ use crate::code::*;
 use crate::compiler::*;
 use crate::object;
 
+use std::convert::TryInto;
+
 pub struct Vm<'a> {
     instructions: &'a Instructions,
     constants: &'a Vec<object::Object>,
@@ -23,14 +25,15 @@ impl<'a> Vm<'a> {
     }
 
     pub fn run(&mut self) -> Result<(), String> {
+        use Op::*;
         let mut i = 0;
 
         while i < self.instructions.len() {
-            let op = self.instructions[i];
+            let op: Op = self.instructions[i].try_into()?;
             i += 1;
 
             match op {
-                OP_CONSTANT => {
+                Constant => {
                     let idx = read_bigendian(self.instructions, i);
                     let value = self.constants[idx as usize].clone();
                     self.stack.push(value);
@@ -38,13 +41,12 @@ impl<'a> Vm<'a> {
 
                     i += 2;
                 }
-                OP_ADD => {
+                Add => {
                     let a = self.stack_pop_int()?;
                     let b = self.stack_pop_int()?;
                     self.stack.push(object::Object::Integer(a + b));
                     self.sp += 1;
                 }
-                other => unimplemented!("run: {:?}", other),
             }
         }
         Ok(())

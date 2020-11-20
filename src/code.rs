@@ -1,8 +1,31 @@
-pub type Instructions = Vec<u8>;
-pub type Opcode = u8;
+use std::convert::TryFrom;
+use std::convert::TryInto;
 
-pub const OP_CONSTANT: Opcode = 0x00;
-pub const OP_ADD: Opcode = 0x01;
+pub type Instructions = Vec<u8>;
+
+#[derive(Clone, Debug)]
+pub enum Op {
+    Constant,
+    Add,
+}
+
+impl Op {
+    pub fn byte(self) -> u8 {
+        self as u8
+    }
+}
+
+impl TryFrom<u8> for Op {
+    type Error = String;
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        match v {
+            x if x == Op::Constant as u8 => Ok(Op::Constant),
+            x if x == Op::Add as u8 => Ok(Op::Add),
+            other => Err(format!("Not an op code: {}", other)),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Definition<'a> {
@@ -10,8 +33,8 @@ pub struct Definition<'a> {
     pub operand_widths: Vec<i32>,
 }
 
-pub fn make(op: Opcode, operands: &[i32]) -> Result<Vec<u8>, String> {
-    let def = lookup_definition(op)?;
+pub fn make(op: Op, operands: &[i32]) -> Result<Vec<u8>, String> {
+    let def: Definition = op.clone().into();
 
     let mut instruction_len = 1;
     for width in def.operand_widths.iter() {
@@ -19,7 +42,7 @@ pub fn make(op: Opcode, operands: &[i32]) -> Result<Vec<u8>, String> {
     }
 
     let mut instruction = vec![0; instruction_len as usize];
-    instruction[0] = op;
+    instruction[0] = op.byte();
 
     let mut offset = 1;
     for (i, o) in operands.iter().enumerate() {
@@ -34,17 +57,19 @@ pub fn make(op: Opcode, operands: &[i32]) -> Result<Vec<u8>, String> {
     Ok(instruction)
 }
 
-pub fn lookup_definition<'a>(op: u8) -> Result<Definition<'a>, String> {
-    match op {
-        OP_CONSTANT => Ok(Definition {
-            name: "OpConstant",
-            operand_widths: vec![2],
-        }),
-        OP_ADD => Ok(Definition {
-            name: "OpAdd",
-            operand_widths: vec![],
-        }),
-        unknown => Err(format!("opcode {} undefined", unknown)),
+impl<'a> Into<Definition<'a>> for Op {
+    fn into(self) -> Definition<'a> {
+        use Op::*;
+        match self {
+            Constant => Definition {
+                name: "OpConstant",
+                operand_widths: vec![2],
+            },
+            Add => Definition {
+                name: "OpAdd",
+                operand_widths: vec![],
+            },
+        }
     }
 }
 
@@ -66,15 +91,19 @@ pub fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
         }
         result.push_str(&format!("{:0width$} ", offset, width = 4));
 
-        let def = lookup_definition(instr[0])
-            .unwrap_or_else(|_| panic!("Definition for instruction {} not found", instr[0]));
+        let def: Definition = Op::try_from(instr[0])
+            .unwrap_or_else(|_| panic!("Definition for instruction {} not found", instr[0]))
+            .into();
 
         result.push_str(def.name);
 
-        match instr[0] {
-            OP_CONSTANT => result.push_str(&format!(" {}", read_bigendian(&instr, 1))),
-            OP_ADD => {}
-            other => unimplemented!("display_instructions: {:?}", other),
+        let op = instr[0]
+            .try_into()
+            .unwrap_or_else(|_| panic!("Unknown op: {}", instr[0]));
+
+        match op {
+            Op::Constant => result.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+            Op::Add => {}
         }
 
         offset += instr.len();
@@ -90,13 +119,17 @@ mod tests {
     #[test]
     fn test_make() {
         let tests = vec![
-            (OP_CONSTANT, vec![65534], vec![OP_CONSTANT, 255, 254]),
-            (OP_ADD, vec![], vec![OP_ADD]),
+            (
+                Op::Constant,
+                vec![65534],
+                vec![Op::Constant.byte(), 255, 254],
+            ),
+            (Op::Add, vec![], vec![Op::Add.byte()]),
         ];
 
         for (op, operands, expected) in tests {
-            let instruction = make(op, &operands).expect(&format!(
-                "Failed to make op={} and operands={:?}",
+            let instruction = make(op.clone(), &operands).expect(&format!(
+                "Failed to make op={:?} and operands={:?}",
                 op, operands
             ));
 
@@ -111,10 +144,10 @@ mod tests {
     #[test]
     fn test_instructions_string() {
         let instructions = vec![
-            make(OP_CONSTANT, &vec![1]).unwrap(),
-            make(OP_ADD, &vec![]).unwrap(),
-            make(OP_CONSTANT, &vec![2]).unwrap(),
-            make(OP_CONSTANT, &vec![65535]).unwrap(),
+            make(Op::Constant, &vec![1]).unwrap(),
+            make(Op::Add, &vec![]).unwrap(),
+            make(Op::Constant, &vec![2]).unwrap(),
+            make(Op::Constant, &vec![65535]).unwrap(),
         ];
 
         let expected = "
