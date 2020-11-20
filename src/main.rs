@@ -2,6 +2,7 @@ use monkey_interpreter::environment::Environment;
 use monkey_interpreter::evaluator::eval as evaluate;
 use monkey_interpreter::lexer::Lexer;
 use monkey_interpreter::parser::Parser;
+use monkey_interpreter::typer;
 
 use std::io;
 use std::io::prelude::*;
@@ -34,11 +35,12 @@ fn prompt(stdout: &io::Stdout) {
 
 fn eval(line: &str, env: Rc<RefCell<Environment>>) {
     let mut parser = Parser::new(Lexer::new(line));
-    match parser.parse_program() {
-        Ok(program) => match evaluate(*program, env) {
-            Ok(result) => println!("{}", result.inspect()),
-            Err(err) => println!("Failed to evaluate: {}", err),
-        },
-        Err(err) => println!("Failed to pase: {}", err),
+    match parser
+        .parse_program()
+        .and_then(|ast| typer::infer_types(*ast))
+        .and_then(|tast| evaluate(tast, env))
+    {
+        Ok(result) => println!("{}", result.inspect()),
+        Err(err) => println!("Failed to evaluate: {}", err),
     }
 }

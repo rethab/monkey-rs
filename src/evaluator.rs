@@ -1,7 +1,7 @@
-use super::ast::{self, *};
 use super::environment::Environment;
 use super::object::Object::*;
 use super::object::*;
+use super::tast::{self, *};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -217,12 +217,12 @@ fn ensure_arg_len<T>(args: &[T], expected: usize) -> Result<(), String> {
 }
 
 fn eval_function(
-    function: ast::Function,
+    function: tast::Function,
     arguments: Vec<Expression>,
     env: Rc<RefCell<Environment>>,
 ) -> EvalResult {
     let (name, parameters, body, captured_env) = match function {
-        ast::Function::Identifier(ident) => match env.borrow().get(&ident.value) {
+        tast::Function::Identifier(ident) => match env.borrow().get(&ident.value) {
             Some(Object::Function {
                 parameters,
                 body,
@@ -246,7 +246,7 @@ fn eval_function(
                 Some(_) | None => return Err(format!("function not found: {}", ident.value)),
             },
         },
-        ast::Function::Literal {
+        tast::Function::Literal {
             parameters, body, ..
         } => ("<anonymous>".into(), parameters, body, None),
     };
@@ -411,6 +411,7 @@ mod test {
 
     use super::super::lexer::Lexer;
     use super::super::parser::Parser;
+    use super::super::typer;
     use super::*;
 
     #[test]
@@ -421,12 +422,10 @@ mod test {
     }
 
     #[test]
-    fn test_band_operator() {
+    fn test_bang_operator() {
         assert_eq!(FALSE, evaluate("!true"));
-        assert_eq!(FALSE, evaluate("!5"));
         assert_eq!(TRUE, evaluate("!!true"));
         assert_eq!(FALSE, evaluate("!!false"));
-        assert_eq!(TRUE, evaluate("!!5"));
     }
 
     #[test]
@@ -492,7 +491,7 @@ mod test {
         assert_eq!(Integer(0), evaluate("if (3 < 4) { 0 } else { 1 }"));
         assert_eq!(NULL, evaluate("if (false) { 0 }"));
         assert_eq!(TRUE, evaluate("if (true) { true }"));
-        assert_eq!(Integer(2), evaluate("if (1) { 2 } else { 3 }"));
+        assert_eq!(Integer(2), evaluate("if (true) { 2 } else { 3 }"));
     }
 
     #[test]
@@ -520,10 +519,6 @@ mod test {
 
     #[test]
     fn test_array() {
-        assert_eq!(
-            Object::Array(vec![Object::Integer(1), Object::String_("foo".into())]),
-            evaluate("[1, \"foo\"]")
-        );
         assert_eq!(Object::Integer(2), evaluate("let xs = [1, 2, 3]; xs[1]"));
         assert_eq!(Object::Integer(2), evaluate("let xs = [1, 1+1, 3]; xs[1]"));
         assert_eq!(Object::Integer(3), evaluate("let xs = [1, 2, 3]; xs[1+1]"));
@@ -852,8 +847,9 @@ mod test {
 
     fn evaluate_res(input: &str) -> EvalResult {
         let p = *Parser::new(Lexer::new(input)).parse_program().unwrap();
+        let tp = typer::infer_types(p).expect("Failed to type program");
         let env = Rc::new(RefCell::new(Environment::default()));
-        eval(p, env)
+        eval(tp, env)
     }
 
     fn evaluate(input: &str) -> Object {
