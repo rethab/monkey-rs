@@ -78,7 +78,7 @@ impl Interpreter for VirtualMachine {
         let bytecode = compiler.bytecode();
         let mut vm = vm::Vm::new(&bytecode);
         vm.run()?;
-        let result = vm.stack_top();
+        let result = vm.last_popped_stack_elem();
         Ok(result.clone())
     }
 }

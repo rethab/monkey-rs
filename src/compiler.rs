@@ -19,7 +19,10 @@ impl Compiler {
     pub fn compile(&mut self, p: ast::Program) -> CompileResult<()> {
         for stmt in p.0 {
             match stmt {
-                ast::Statement::Expression { value, .. } => self.compile_expression(value)?,
+                ast::Statement::Expression { value, .. } => {
+                    self.compile_expression(value)?;
+                    self.emit(Op::Pop, &[])?;
+                }
                 other => unimplemented!("compile: {:?}", other),
             }
         }
@@ -97,6 +100,17 @@ mod tests {
                 make(Op::Constant, &vec![0]).unwrap(),
                 make(Op::Constant, &vec![1]).unwrap(),
                 make(Op::Add, &vec![]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "1; 2;",
+            vec![int(1), int(2)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
             ],
         )
     }

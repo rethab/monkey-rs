@@ -7,6 +7,7 @@ pub type Instructions = Vec<u8>;
 pub enum Op {
     Constant,
     Add,
+    Pop,
 }
 
 impl Op {
@@ -22,6 +23,7 @@ impl TryFrom<u8> for Op {
         match v {
             x if x == Op::Constant as u8 => Ok(Op::Constant),
             x if x == Op::Add as u8 => Ok(Op::Add),
+            x if x == Op::Pop as u8 => Ok(Op::Pop),
             other => Err(format!("Not an op code: {}", other)),
         }
     }
@@ -69,6 +71,10 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpAdd",
                 operand_widths: vec![],
             },
+            Pop => Definition {
+                name: "OpPop",
+                operand_widths: vec![],
+            },
         }
     }
 }
@@ -104,6 +110,7 @@ pub fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
         match op {
             Op::Constant => result.push_str(&format!(" {}", read_bigendian(&instr, 1))),
             Op::Add => {}
+            Op::Pop => {}
         }
 
         offset += instr.len();

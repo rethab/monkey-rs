@@ -4,14 +4,42 @@ use crate::object;
 
 use std::convert::TryInto;
 
+const STACK_SIZE: usize = 2048;
+
 pub struct Vm<'a> {
     instructions: &'a Instructions,
     constants: &'a Vec<object::Object>,
-    stack: Vec<object::Object>,
+    stack: Stack,
+}
+
+pub struct Stack {
+    elems: Vec<object::Object>,
     sp: usize, // points to next free
 }
 
-const STACK_SIZE: usize = 2048;
+impl Stack {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            elems: vec![object::NULL; capacity],
+            sp: 0,
+        }
+    }
+
+    pub fn pop(&mut self) -> Result<object::Object, String> {
+        let object = self.elems[self.sp - 1].clone();
+        self.sp -= 1;
+        Ok(object)
+    }
+
+    pub fn push(&mut self, obj: object::Object) {
+        self.elems[self.sp] = obj;
+        self.sp += 1;
+    }
+
+    pub fn last_popped_elem(&self) -> &object::Object {
+        &self.elems[self.sp]
+    }
+}
 
 impl<'a> Vm<'a> {
     pub fn new(b: &'a Bytecode) -> Self {
@@ -19,8 +47,7 @@ impl<'a> Vm<'a> {
             instructions: b.instructions,
             constants: b.constants,
 
-            stack: Vec::with_capacity(STACK_SIZE),
-            sp: 0,
+            stack: Stack::with_capacity(STACK_SIZE),
         }
     }
 
@@ -37,7 +64,6 @@ impl<'a> Vm<'a> {
                     let idx = read_bigendian(self.instructions, i);
                     let value = self.constants[idx as usize].clone();
                     self.stack.push(value);
-                    self.sp += 1;
 
                     i += 2;
                 }
@@ -45,24 +71,24 @@ impl<'a> Vm<'a> {
                     let a = self.stack_pop_int()?;
                     let b = self.stack_pop_int()?;
                     self.stack.push(object::Object::Integer(a + b));
-                    self.sp += 1;
+                }
+                Pop => {
+                    self.stack.pop()?;
                 }
             }
         }
         Ok(())
     }
 
-    pub fn stack_pop_int(&mut self) -> Result<i64, String> {
-        let object = self.stack.pop().ok_or("empty stack")?;
-        self.sp -= 1;
-        match object {
+    pub fn last_popped_stack_elem(&self) -> &object::Object {
+        self.stack.last_popped_elem()
+    }
+
+    fn stack_pop_int(&mut self) -> Result<i64, String> {
+        match self.stack.pop()? {
             object::Object::Integer(i) => Ok(i),
             other => Err(format!("Expected integer on stack, but got: {:?}", other)),
         }
-    }
-
-    pub fn stack_top(&self) -> &object::Object {
-        &self.stack[self.sp - 1]
     }
 }
 
@@ -89,7 +115,7 @@ mod tests {
         let mut vm = Vm::new(bytecode);
         vm.run()?;
 
-        let result = vm.stack_top();
+        let result = vm.last_popped_stack_elem();
         assert_eq!(*result, expected);
         Ok(())
     }
