@@ -68,8 +68,13 @@ impl<'a> Vm<'a> {
                     i += 2;
                 }
                 Add | Sub | Mul | Div => {
-                    self.run_binary_op(op)?;
+                    self.run_binary_int_op(op)?;
                 }
+                Equal | NotEqual | GreaterThan => {
+                    self.run_binary_comp_op(op)?;
+                }
+                True => self.stack.push(object::TRUE),
+                False => self.stack.push(object::FALSE),
                 Pop => {
                     self.stack.pop()?;
                 }
@@ -78,7 +83,7 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
-    fn run_binary_op(&mut self, op: Op) -> Result<(), String> {
+    fn run_binary_int_op(&mut self, op: Op) -> Result<(), String> {
         let b = self.stack_pop_int()?;
         let a = self.stack_pop_int()?;
         use Op::*;
@@ -100,15 +105,34 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
+    fn run_binary_comp_op(&mut self, op: Op) -> Result<(), String> {
+        let b = self.stack.pop()?;
+        let a = self.stack.pop()?;
+        use Op::*;
+        let res = match op {
+            Equal => a == b,
+            NotEqual => a != b,
+            GreaterThan => int_or_error(a)? > int_or_error(b)?,
+            other => panic!("Not a binary comp op: {:?}", other),
+        };
+
+        self.stack.push(object::Object::Boolean(res));
+        Ok(())
+    }
+
     pub fn last_popped_stack_elem(&self) -> &object::Object {
         self.stack.last_popped_elem()
     }
 
     fn stack_pop_int(&mut self) -> Result<i64, String> {
-        match self.stack.pop()? {
-            object::Object::Integer(i) => Ok(i),
-            other => Err(format!("Expected integer on stack, but got: {:?}", other)),
-        }
+        self.stack.pop().and_then(int_or_error)
+    }
+}
+
+fn int_or_error(obj: object::Object) -> Result<i64, String> {
+    match obj {
+        object::Object::Integer(i) => Ok(i),
+        other => Err(format!("Expected integer on stack, but got: {:?}", other)),
     }
 }
 
@@ -120,30 +144,36 @@ mod tests {
     use crate::parser::Parser;
 
     #[test]
-    fn test_integer_arithmetic() -> Result<(), String> {
-        run_vm_test("1", int(1))?;
-        run_vm_test("2", int(2))?;
-        run_vm_test("1 + 2", int(3))?;
-        run_vm_test("1 - 2", int(-1))?;
-        run_vm_test("2 * 2", int(4))?;
-        run_vm_test("4 / 2", int(2))?;
-        run_vm_test("4 / 2 + 2", int(4))?;
-        run_vm_test("5 * (2 + 10)", int(60))?;
-        run_vm_test("50 / 2 * 2 + 10 - 5", int(55))
+    fn test_integer_arithmetic() {
+        assert_eq!(run_vm_test("1"), int(1));
+        assert_eq!(run_vm_test("2"), int(2));
+        assert_eq!(run_vm_test("1 + 2"), int(3));
+        assert_eq!(run_vm_test("1 - 2"), int(-1));
+        assert_eq!(run_vm_test("2 * 2"), int(4));
+        assert_eq!(run_vm_test("4 / 2"), int(2));
+        assert_eq!(run_vm_test("4 / 2 + 2"), int(4));
+        assert_eq!(run_vm_test("5 * (2 + 10)"), int(60));
+        assert_eq!(run_vm_test("50 / 2 * 2 + 10 - 5"), int(55));
+        assert_eq!(run_vm_test("true"), boolean(true));
+        assert_eq!(run_vm_test("false"), boolean(false));
+        assert_eq!(run_vm_test("1 == 1"), boolean(true));
+        assert_eq!(run_vm_test("false != true"), boolean(true));
+        assert_eq!(run_vm_test("1 > 2"), boolean(false));
+        assert_eq!(run_vm_test("12 > 2"), boolean(true));
+        assert_eq!(run_vm_test("(2 > 1) != false"), boolean(true));
     }
 
-    fn run_vm_test(input: &str, expected: object::Object) -> Result<(), String> {
+    fn run_vm_test(input: &str) -> object::Object {
         let p = parse(input);
         let mut c = Compiler::default();
-        c.compile(p)?;
+        c.compile(p).expect("Failed to compile");
 
         let bytecode = &c.bytecode();
         let mut vm = Vm::new(bytecode);
-        vm.run()?;
+        vm.run().expect("Failed to run");
 
         let result = vm.last_popped_stack_elem();
-        assert_eq!(*result, expected);
-        Ok(())
+        result.clone()
     }
 
     fn parse(input: &str) -> ast::Program {
@@ -152,5 +182,9 @@ mod tests {
 
     fn int(i: i64) -> object::Object {
         object::Object::Integer(i)
+    }
+
+    fn boolean(b: bool) -> object::Object {
+        object::Object::Boolean(b)
     }
 }

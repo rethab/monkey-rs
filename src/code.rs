@@ -10,6 +10,11 @@ pub enum Op {
     Sub,
     Mul,
     Div,
+    True,
+    False,
+    Equal,
+    NotEqual,
+    GreaterThan,
     Pop,
 }
 
@@ -25,10 +30,15 @@ impl TryFrom<u8> for Op {
     fn try_from(v: u8) -> Result<Self, Self::Error> {
         match v {
             x if x == Op::Constant as u8 => Ok(Op::Constant),
+            x if x == Op::True as u8 => Ok(Op::True),
+            x if x == Op::False as u8 => Ok(Op::False),
             x if x == Op::Add as u8 => Ok(Op::Add),
             x if x == Op::Sub as u8 => Ok(Op::Sub),
             x if x == Op::Mul as u8 => Ok(Op::Mul),
             x if x == Op::Div as u8 => Ok(Op::Div),
+            x if x == Op::Equal as u8 => Ok(Op::Equal),
+            x if x == Op::NotEqual as u8 => Ok(Op::NotEqual),
+            x if x == Op::GreaterThan as u8 => Ok(Op::GreaterThan),
             x if x == Op::Pop as u8 => Ok(Op::Pop),
             other => Err(format!("Not an op code: {}", other)),
         }
@@ -73,6 +83,14 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpConstant",
                 operand_widths: vec![2],
             },
+            True => Definition {
+                name: "OpTrue",
+                operand_widths: vec![],
+            },
+            False => Definition {
+                name: "OpFalse",
+                operand_widths: vec![],
+            },
             Add => Definition {
                 name: "OpAdd",
                 operand_widths: vec![],
@@ -87,6 +105,18 @@ impl<'a> Into<Definition<'a>> for Op {
             },
             Div => Definition {
                 name: "OpDiv",
+                operand_widths: vec![],
+            },
+            Equal => Definition {
+                name: "OpEqual",
+                operand_widths: vec![],
+            },
+            NotEqual => Definition {
+                name: "OpNotEqual",
+                operand_widths: vec![],
+            },
+            GreaterThan => Definition {
+                name: "OpGreaterThan",
                 operand_widths: vec![],
             },
             Pop => Definition {
@@ -127,10 +157,15 @@ pub fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
 
         match op {
             Op::Constant => result.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+            Op::True => {}
+            Op::False => {}
             Op::Add => {}
             Op::Sub => {}
             Op::Mul => {}
             Op::Div => {}
+            Op::Equal => {}
+            Op::NotEqual => {}
+            Op::GreaterThan => {}
             Op::Pop => {}
         }
 
@@ -152,10 +187,16 @@ mod tests {
                 vec![65534],
                 vec![Op::Constant.byte(), 255, 254],
             ),
+            (Op::True, vec![], vec![Op::True.byte()]),
+            (Op::False, vec![], vec![Op::False.byte()]),
             (Op::Add, vec![], vec![Op::Add.byte()]),
             (Op::Sub, vec![], vec![Op::Sub.byte()]),
             (Op::Mul, vec![], vec![Op::Mul.byte()]),
             (Op::Div, vec![], vec![Op::Div.byte()]),
+            (Op::Equal, vec![], vec![Op::Equal.byte()]),
+            (Op::NotEqual, vec![], vec![Op::NotEqual.byte()]),
+            (Op::GreaterThan, vec![], vec![Op::GreaterThan.byte()]),
+            (Op::Pop, vec![], vec![Op::Pop.byte()]),
         ];
 
         for (op, operands, expected) in tests {
@@ -183,6 +224,11 @@ mod tests {
             make(Op::Mul, &vec![]).unwrap(),
             make(Op::Div, &vec![]).unwrap(),
             make(Op::Pop, &vec![]).unwrap(),
+            make(Op::True, &vec![]).unwrap(),
+            make(Op::False, &vec![]).unwrap(),
+            make(Op::Equal, &vec![]).unwrap(),
+            make(Op::NotEqual, &vec![]).unwrap(),
+            make(Op::GreaterThan, &vec![]).unwrap(),
         ];
 
         let expected = "
@@ -194,6 +240,11 @@ mod tests {
             0011 OpMul
             0012 OpDiv
             0013 OpPop
+            0014 OpTrue
+            0015 OpFalse
+            0016 OpEqual
+            0017 OpNotEqual
+            0018 OpGreaterThan
         "
         .trim()
         .replace("            ", "");

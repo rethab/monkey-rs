@@ -34,26 +34,26 @@ impl Compiler {
             ast::Expression::Infix { op, lhs, rhs, .. } => {
                 self.compile_expression(*lhs)?;
                 self.compile_expression(*rhs)?;
-                match op.as_str() {
-                    "+" => {
-                        self.emit(Op::Add, &[])?;
-                    }
-                    "-" => {
-                        self.emit(Op::Sub, &[])?;
-                    }
-                    "*" => {
-                        self.emit(Op::Mul, &[])?;
-                    }
-                    "/" => {
-                        self.emit(Op::Div, &[])?;
-                    }
+                let op = match op.as_str() {
+                    "+" => Op::Add,
+                    "-" => Op::Sub,
+                    "*" => Op::Mul,
+                    "/" => Op::Div,
+                    "==" => Op::Equal,
+                    "!=" => Op::NotEqual,
+                    ">" => Op::GreaterThan,
                     other => unimplemented!("compile_expression/op: {}", other),
-                }
+                };
+                self.emit(op, &[])?;
             }
             ast::Expression::IntLiteral { value, .. } => {
                 let int = object::Object::Integer(value as i64);
                 let pos = self.add_constant(int);
                 self.emit(Op::Constant, &[pos])?;
+            }
+            ast::Expression::BooleanLiteral { value, .. } => {
+                let op = if value { Op::True } else { Op::False };
+                self.emit(op, &[])?;
             }
             other => unimplemented!("compile_expression: {:?}", other),
         }
@@ -119,6 +119,24 @@ mod tests {
                 make(Op::Constant, &vec![0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
                 make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "1 == 2",
+            vec![int(1), int(2)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Equal, &vec![]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "true",
+            vec![],
+            vec![
+                make(Op::True, &vec![]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
