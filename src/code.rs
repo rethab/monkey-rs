@@ -6,15 +6,27 @@ pub type Instructions = Vec<u8>;
 #[derive(Clone, Debug)]
 pub enum Op {
     Constant,
+
+    // booleans
+    True,
+    False,
+
+    // int ops
     Add,
     Sub,
     Mul,
     Div,
-    True,
-    False,
+
+    // comparisons
     Equal,
     NotEqual,
     GreaterThan,
+
+    // prefix
+    Minus,
+    Bang,
+
+    // misc
     Pop,
 }
 
@@ -39,6 +51,8 @@ impl TryFrom<u8> for Op {
             x if x == Op::Equal as u8 => Ok(Op::Equal),
             x if x == Op::NotEqual as u8 => Ok(Op::NotEqual),
             x if x == Op::GreaterThan as u8 => Ok(Op::GreaterThan),
+            x if x == Op::Minus as u8 => Ok(Op::Minus),
+            x if x == Op::Bang as u8 => Ok(Op::Bang),
             x if x == Op::Pop as u8 => Ok(Op::Pop),
             other => Err(format!("Not an op code: {}", other)),
         }
@@ -119,6 +133,14 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpGreaterThan",
                 operand_widths: vec![],
             },
+            Minus => Definition {
+                name: "OpMinus",
+                operand_widths: vec![],
+            },
+            Bang => Definition {
+                name: "OpBang",
+                operand_widths: vec![],
+            },
             Pop => Definition {
                 name: "OpPop",
                 operand_widths: vec![],
@@ -166,6 +188,8 @@ pub fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
             Op::Equal => {}
             Op::NotEqual => {}
             Op::GreaterThan => {}
+            Op::Minus => {}
+            Op::Bang => {}
             Op::Pop => {}
         }
 
@@ -196,6 +220,8 @@ mod tests {
             (Op::Equal, vec![], vec![Op::Equal.byte()]),
             (Op::NotEqual, vec![], vec![Op::NotEqual.byte()]),
             (Op::GreaterThan, vec![], vec![Op::GreaterThan.byte()]),
+            (Op::Minus, vec![], vec![Op::Minus.byte()]),
+            (Op::Bang, vec![], vec![Op::Bang.byte()]),
             (Op::Pop, vec![], vec![Op::Pop.byte()]),
         ];
 
@@ -229,6 +255,8 @@ mod tests {
             make(Op::Equal, &vec![]).unwrap(),
             make(Op::NotEqual, &vec![]).unwrap(),
             make(Op::GreaterThan, &vec![]).unwrap(),
+            make(Op::Minus, &vec![]).unwrap(),
+            make(Op::Bang, &vec![]).unwrap(),
         ];
 
         let expected = "
@@ -245,6 +273,8 @@ mod tests {
             0016 OpEqual
             0017 OpNotEqual
             0018 OpGreaterThan
+            0019 OpMinus
+            0020 OpBang
         "
         .trim()
         .replace("            ", "");

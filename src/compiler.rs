@@ -46,6 +46,15 @@ impl Compiler {
                 };
                 self.emit(op, &[])?;
             }
+            ast::Expression::Prefix { op, rhs, .. } => {
+                self.compile_expression(*rhs)?;
+                let op = match op.as_str() {
+                    "-" => Op::Minus,
+                    "!" => Op::Bang,
+                    other => unimplemented!("compile_expression/op: {}", other),
+                };
+                self.emit(op, &[])?;
+            }
             ast::Expression::IntLiteral { value, .. } => {
                 let int = object::Object::Integer(value as i64);
                 let pos = self.add_constant(int);
@@ -139,6 +148,24 @@ mod tests {
                 make(Op::True, &vec![]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
+        )?;
+        run_copmiler_test(
+            "!true",
+            vec![],
+            vec![
+                make(Op::True, &vec![]).unwrap(),
+                make(Op::Bang, &vec![]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "-1",
+            vec![int(1)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Minus, &vec![]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
         )
     }
 
@@ -178,7 +205,7 @@ mod tests {
                     "wrong instruction at {}. expected={:?}, actual={:?}",
                     i,
                     display_instructions(expected_instructions),
-                    actual
+                    display_instructions(vec![actual.clone()]),
                 ));
             }
         }

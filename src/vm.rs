@@ -67,16 +67,19 @@ impl<'a> Vm<'a> {
 
                     i += 2;
                 }
+                True => self.stack.push(object::TRUE),
+                False => self.stack.push(object::FALSE),
+                Pop => {
+                    self.stack.pop()?;
+                }
                 Add | Sub | Mul | Div => {
                     self.run_binary_int_op(op)?;
                 }
                 Equal | NotEqual | GreaterThan => {
                     self.run_binary_comp_op(op)?;
                 }
-                True => self.stack.push(object::TRUE),
-                False => self.stack.push(object::FALSE),
-                Pop => {
-                    self.stack.pop()?;
+                Minus | Bang => {
+                    self.run_unary_op(op)?;
                 }
             }
         }
@@ -120,6 +123,25 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
+    fn run_unary_op(&mut self, op: Op) -> Result<(), String> {
+        let a = self.stack.pop()?;
+        use Op::*;
+        let res = match op {
+            Minus => object::Object::Integer(-int_or_error(a)?),
+            Bang => {
+                if !bool_or_error(a)? {
+                    object::TRUE
+                } else {
+                    object::FALSE
+                }
+            }
+            other => panic!("Not a binary comp op: {:?}", other),
+        };
+
+        self.stack.push(res);
+        Ok(())
+    }
+
     pub fn last_popped_stack_elem(&self) -> &object::Object {
         self.stack.last_popped_elem()
     }
@@ -133,6 +155,13 @@ fn int_or_error(obj: object::Object) -> Result<i64, String> {
     match obj {
         object::Object::Integer(i) => Ok(i),
         other => Err(format!("Expected integer on stack, but got: {:?}", other)),
+    }
+}
+
+fn bool_or_error(obj: object::Object) -> Result<bool, String> {
+    match obj {
+        object::Object::Boolean(i) => Ok(i),
+        other => Err(format!("Expected bool on stack, but got: {:?}", other)),
     }
 }
 
@@ -161,6 +190,10 @@ mod tests {
         assert_eq!(run_vm_test("1 > 2"), boolean(false));
         assert_eq!(run_vm_test("12 > 2"), boolean(true));
         assert_eq!(run_vm_test("(2 > 1) != false"), boolean(true));
+        assert_eq!(run_vm_test("-1"), int(-1));
+        assert_eq!(run_vm_test("!true"), boolean(false));
+        assert_eq!(run_vm_test("!!true"), boolean(true));
+        assert_eq!(run_vm_test("!(-1 > 2)"), boolean(true));
     }
 
     fn run_vm_test(input: &str) -> object::Object {
