@@ -3,7 +3,7 @@ use std::convert::TryInto;
 
 pub type Instructions = Vec<u8>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Op {
     Constant,
 
@@ -28,6 +28,10 @@ pub enum Op {
 
     // misc
     Pop,
+
+    // jumps
+    JumpNotTrue,
+    Jump,
 }
 
 impl Op {
@@ -54,6 +58,8 @@ impl TryFrom<u8> for Op {
             x if x == Op::Minus as u8 => Ok(Op::Minus),
             x if x == Op::Bang as u8 => Ok(Op::Bang),
             x if x == Op::Pop as u8 => Ok(Op::Pop),
+            x if x == Op::JumpNotTrue as u8 => Ok(Op::JumpNotTrue),
+            x if x == Op::Jump as u8 => Ok(Op::Jump),
             other => Err(format!("Not an op code: {}", other)),
         }
     }
@@ -145,6 +151,14 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpPop",
                 operand_widths: vec![],
             },
+            JumpNotTrue => Definition {
+                name: "OpJumpNotTrue",
+                operand_widths: vec![2],
+            },
+            Jump => Definition {
+                name: "OpJump",
+                operand_widths: vec![2],
+            },
         }
     }
 }
@@ -158,41 +172,46 @@ pub fn read_bigendian(vs: &[u8], offset: usize) -> u16 {
     ((vs[offset] as u16) << 8) | vs[offset + 1] as u16
 }
 
+pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String) {
+    if !buf.is_empty() {
+        buf.push('\n');
+    }
+    buf.push_str(&format!("{:0width$} ", offset, width = 4));
+
+    let def: Definition = Op::try_from(instr[0])
+        .unwrap_or_else(|_| panic!("Definition for instruction {} not found", instr[0]))
+        .into();
+
+    buf.push_str(def.name);
+
+    let op = instr[0]
+        .try_into()
+        .unwrap_or_else(|_| panic!("Unknown op: {}", instr[0]));
+
+    match op {
+        Op::Constant => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+        Op::JumpNotTrue => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+        Op::Jump => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+        Op::True => {}
+        Op::False => {}
+        Op::Add => {}
+        Op::Sub => {}
+        Op::Mul => {}
+        Op::Div => {}
+        Op::Equal => {}
+        Op::NotEqual => {}
+        Op::GreaterThan => {}
+        Op::Minus => {}
+        Op::Bang => {}
+        Op::Pop => {}
+    }
+}
+
 pub fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
     let mut result = String::new();
     let mut offset = 0;
     for instr in instructions {
-        if !result.is_empty() {
-            result.push('\n');
-        }
-        result.push_str(&format!("{:0width$} ", offset, width = 4));
-
-        let def: Definition = Op::try_from(instr[0])
-            .unwrap_or_else(|_| panic!("Definition for instruction {} not found", instr[0]))
-            .into();
-
-        result.push_str(def.name);
-
-        let op = instr[0]
-            .try_into()
-            .unwrap_or_else(|_| panic!("Unknown op: {}", instr[0]));
-
-        match op {
-            Op::Constant => result.push_str(&format!(" {}", read_bigendian(&instr, 1))),
-            Op::True => {}
-            Op::False => {}
-            Op::Add => {}
-            Op::Sub => {}
-            Op::Mul => {}
-            Op::Div => {}
-            Op::Equal => {}
-            Op::NotEqual => {}
-            Op::GreaterThan => {}
-            Op::Minus => {}
-            Op::Bang => {}
-            Op::Pop => {}
-        }
-
+        display_instruction(&instr, offset, &mut result);
         offset += instr.len();
     }
     result
@@ -223,6 +242,12 @@ mod tests {
             (Op::Minus, vec![], vec![Op::Minus.byte()]),
             (Op::Bang, vec![], vec![Op::Bang.byte()]),
             (Op::Pop, vec![], vec![Op::Pop.byte()]),
+            (
+                Op::JumpNotTrue,
+                vec![65534],
+                vec![Op::JumpNotTrue.byte(), 255, 254],
+            ),
+            (Op::Jump, vec![65534], vec![Op::Jump.byte(), 255, 254]),
         ];
 
         for (op, operands, expected) in tests {
@@ -257,6 +282,8 @@ mod tests {
             make(Op::GreaterThan, &vec![]).unwrap(),
             make(Op::Minus, &vec![]).unwrap(),
             make(Op::Bang, &vec![]).unwrap(),
+            make(Op::JumpNotTrue, &vec![36435]).unwrap(),
+            make(Op::Jump, &vec![678]).unwrap(),
         ];
 
         let expected = "
@@ -275,6 +302,8 @@ mod tests {
             0018 OpGreaterThan
             0019 OpMinus
             0020 OpBang
+            0021 OpJumpNotTrue 36435
+            0024 OpJump 678
         "
         .trim()
         .replace("            ", "");

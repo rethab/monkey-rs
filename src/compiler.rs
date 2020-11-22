@@ -2,9 +2,17 @@ use crate::ast;
 use crate::code::*;
 use crate::object;
 
+struct EmittedInstruction {
+    op: Op,
+    position: usize,
+}
+
 pub struct Compiler {
     instructions: Instructions,
     constants: Vec<object::Object>,
+
+    last_instruction: Option<EmittedInstruction>,
+    previous_instruction: Option<EmittedInstruction>,
 }
 
 #[derive(Clone)]
@@ -18,19 +26,45 @@ type CompileResult<T> = Result<T, String>;
 impl Compiler {
     pub fn compile(&mut self, p: ast::Program) -> CompileResult<()> {
         for stmt in p.0 {
-            match stmt {
-                ast::Statement::Expression { value, .. } => {
-                    self.compile_expression(value)?;
-                    self.emit(Op::Pop, &[])?;
-                }
-                other => unimplemented!("compile: {:?}", other),
-            }
+            self.compile_statement(stmt)?;
         }
         Ok(())
     }
 
+    fn compile_statement(&mut self, stmt: ast::Statement) -> CompileResult<()> {
+        match stmt {
+            ast::Statement::Expression { value, .. } => {
+                self.compile_expression(value)?;
+                self.emit(Op::Pop, &[])?;
+                Ok(())
+            }
+            ast::Statement::Block { mut statements, .. } if statements.len() == 1 => {
+                self.compile_statement(statements.remove(0))?;
+                Ok(())
+            }
+            other => unimplemented!("statement: {:?}", other),
+        }
+    }
+
     fn compile_expression(&mut self, exp: ast::Expression) -> CompileResult<()> {
         match exp {
+            ast::Expression::If {
+                condition,
+                consequence,
+                ..
+            } => {
+                self.compile_expression(*condition)?;
+                // dummy jump
+                let jump_idx = self.emit(Op::JumpNotTrue, &[-1])?;
+                self.compile_statement(*consequence)?;
+                if self.last_instruction_is_pop() {
+                    self.remove_last_pop();
+                }
+
+                // fix up the jump
+                let after_consequence = self.instructions.len() as i32;
+                self.replace_op(jump_idx, Op::JumpNotTrue, &[after_consequence])?;
+            }
             ast::Expression::Infix { op, lhs, rhs, .. } => {
                 self.compile_expression(*lhs)?;
                 self.compile_expression(*rhs)?;
@@ -69,15 +103,59 @@ impl Compiler {
         Ok(())
     }
 
-    fn emit(&mut self, op: Op, operands: &[i32]) -> CompileResult<i32> {
-        let instruction = make(op, operands)?;
-        Ok(self.add_instruction(&instruction))
+    fn emit(&mut self, op: Op, operands: &[i32]) -> CompileResult<usize> {
+        let instruction = make(op.clone(), operands)?;
+        let pos = self.add_instruction(&instruction);
+
+        self.set_last_instruction(op, pos);
+        Ok(pos)
     }
 
-    fn add_instruction(&mut self, ins: &[u8]) -> i32 {
+    fn replace_op(&mut self, mut idx: usize, op: Op, operands: &[i32]) -> CompileResult<()> {
+        let instruction = make(op, operands)?;
+        for ins in instruction {
+            self.instructions[idx] = ins;
+            idx += 1;
+        }
+        Ok(())
+    }
+
+    fn set_last_instruction(&mut self, op: Op, position: usize) {
+        if let Some(last) = self.last_instruction.take() {
+            self.previous_instruction = Some(last);
+        }
+        self.last_instruction = Some(EmittedInstruction { op, position });
+    }
+
+    fn last_instruction_is_pop(&self) -> bool {
+        if let Some(last) = &self.last_instruction {
+            last.op == Op::Pop
+        } else {
+            false
+        }
+    }
+
+    fn remove_last_pop(&mut self) {
+        let last_emitted = self
+            .last_instruction
+            .take()
+            .unwrap_or_else(|| panic!("last instruction not set"));
+
+        if last_emitted.op != Op::Pop {
+            panic!("Last op is not Pop, but {:?}", last_emitted.op);
+        }
+
+        self.instructions.drain(last_emitted.position..);
+
+        if let Some(previous) = self.previous_instruction.take() {
+            self.last_instruction = Some(previous);
+        }
+    }
+
+    fn add_instruction(&mut self, ins: &[u8]) -> usize {
         let pos = self.instructions.len();
         self.instructions.extend(ins);
-        pos as i32
+        pos
     }
 
     fn add_constant(&mut self, obj: object::Object) -> i32 {
@@ -98,6 +176,9 @@ impl Default for Compiler {
         Self {
             instructions: Vec::new(),
             constants: Vec::new(),
+
+            last_instruction: None,
+            previous_instruction: None,
         }
     }
 }
@@ -108,9 +189,10 @@ mod tests {
     use super::*;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
+    use std::convert::TryFrom;
 
     #[test]
-    fn test_integer_arithmetic() -> Result<(), String> {
+    fn test_integer_and_booleans() -> Result<(), String> {
         run_copmiler_test(
             "1 + 2",
             vec![int(1), int(2)],
@@ -169,6 +251,28 @@ mod tests {
         )
     }
 
+    #[test]
+    fn test_conditionals() -> Result<(), String> {
+        run_copmiler_test(
+            "if (true) { 10 }; 3333",
+            vec![int(10), int(3333)],
+            vec![
+                // 0000
+                make(Op::True, &vec![]).unwrap(),
+                // 0001
+                make(Op::JumpNotTrue, &vec![7]).unwrap(),
+                // 0004
+                make(Op::Constant, &vec![0]).unwrap(),
+                // 0007
+                make(Op::Pop, &vec![]).unwrap(),
+                // 0008
+                make(Op::Constant, &vec![1]).unwrap(),
+                // 00011
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
     fn run_copmiler_test(
         input: &str,
         expected_constants: Vec<object::Object>,
@@ -195,7 +299,7 @@ mod tests {
             return Err(format!(
                 "wrong instructions length. expected={:?}, actual={:?}",
                 display_instructions(expected_instructions),
-                actual
+                display_flat_instructions(actual.to_vec()),
             ));
         }
 
@@ -205,7 +309,7 @@ mod tests {
                     "wrong instruction at {}. expected={:?}, actual={:?}",
                     i,
                     display_instructions(expected_instructions),
-                    display_instructions(vec![actual.clone()]),
+                    display_flat_instructions(actual.to_vec()),
                 ));
             }
         }
@@ -245,5 +349,27 @@ mod tests {
 
     fn int(i: i64) -> object::Object {
         object::Object::Integer(i)
+    }
+
+    fn display_flat_instructions(instructions: Vec<u8>) -> String {
+        let mut result = String::new();
+        let mut index = 0;
+        while index < instructions.len() {
+            let def: Definition = Op::try_from(instructions[index])
+                .unwrap_or_else(|_| {
+                    panic!("Definition for instruction {} not found", instructions[0])
+                })
+                .into();
+
+            let mut length = 0;
+            for width in def.operand_widths {
+                length += width as usize;
+            }
+
+            let instr = &instructions[index..=(index + length)];
+            display_instruction(instr, index, &mut result);
+            index += 1 + length;
+        }
+        result
     }
 }

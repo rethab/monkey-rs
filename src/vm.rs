@@ -81,6 +81,9 @@ impl<'a> Vm<'a> {
                 Minus | Bang => {
                     self.run_unary_op(op)?;
                 }
+                JumpNotTrue | Jump => {
+                    unimplemented!("jump(nottrue)")
+                }
             }
         }
         Ok(())
