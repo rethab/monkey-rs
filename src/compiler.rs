@@ -51,19 +51,36 @@ impl Compiler {
             ast::Expression::If {
                 condition,
                 consequence,
+                alternative,
                 ..
             } => {
                 self.compile_expression(*condition)?;
-                // dummy jump
-                let jump_idx = self.emit(Op::JumpNotTrue, &[-1])?;
+
+                // jump over consequence
+                let cons_jump_idx = self.emit(Op::JumpNotTrue, &[-1])?;
                 self.compile_statement(*consequence)?;
                 if self.last_instruction_is_pop() {
                     self.remove_last_pop();
                 }
 
+                // jump over alternative?
+                let mut alt_jump_idx = None;
+                if alternative.is_some() {
+                    alt_jump_idx = Some(self.emit(Op::Jump, &[-1])?);
+                }
+
                 // fix up the jump
                 let after_consequence = self.instructions.len() as i32;
-                self.replace_op(jump_idx, Op::JumpNotTrue, &[after_consequence])?;
+                self.replace_op(cons_jump_idx, Op::JumpNotTrue, &[after_consequence])?;
+
+                if let Some(alt) = alternative {
+                    self.compile_statement(*alt)?;
+                    if self.last_instruction_is_pop() {
+                        self.remove_last_pop();
+                    }
+                    let after_alternative = self.instructions.len() as i32;
+                    self.replace_op(alt_jump_idx.unwrap(), Op::Jump, &[after_alternative])?;
+                }
             }
             ast::Expression::Infix { op, lhs, rhs, .. } => {
                 self.compile_expression(*lhs)?;
@@ -76,6 +93,7 @@ impl Compiler {
                     "==" => Op::Equal,
                     "!=" => Op::NotEqual,
                     ">" => Op::GreaterThan,
+                    "<" => Op::LessThan,
                     other => unimplemented!("compile_expression/op: {}", other),
                 };
                 self.emit(op, &[])?;
@@ -268,6 +286,28 @@ mod tests {
                 // 0008
                 make(Op::Constant, &vec![1]).unwrap(),
                 // 00011
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "if (true) { 10 } else { 20 }; 3333",
+            vec![int(10), int(20), int(3333)],
+            vec![
+                // 0000
+                make(Op::True, &vec![]).unwrap(),
+                // 0001
+                make(Op::JumpNotTrue, &vec![10]).unwrap(),
+                // 0004
+                make(Op::Constant, &vec![0]).unwrap(),
+                // 0007
+                make(Op::Jump, &vec![13]).unwrap(),
+                // 0010
+                make(Op::Constant, &vec![1]).unwrap(),
+                // 00013
+                make(Op::Pop, &vec![]).unwrap(),
+                // 00014
+                make(Op::Constant, &vec![2]).unwrap(),
+                // 00017
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )

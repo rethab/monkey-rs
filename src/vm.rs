@@ -57,11 +57,10 @@ impl<'a> Vm<'a> {
 
         while i < self.instructions.len() {
             let op: Op = self.instructions[i].try_into()?;
-            i += 1;
 
             match op {
                 Constant => {
-                    let idx = read_bigendian(self.instructions, i);
+                    let idx = read_bigendian(self.instructions, i + 1);
                     let value = self.constants[idx as usize].clone();
                     self.stack.push(value);
 
@@ -75,16 +74,28 @@ impl<'a> Vm<'a> {
                 Add | Sub | Mul | Div => {
                     self.run_binary_int_op(op)?;
                 }
-                Equal | NotEqual | GreaterThan => {
+                Equal | NotEqual | GreaterThan | LessThan => {
                     self.run_binary_comp_op(op)?;
                 }
                 Minus | Bang => {
                     self.run_unary_op(op)?;
                 }
-                JumpNotTrue | Jump => {
-                    unimplemented!("jump(nottrue)")
+                Jump => {
+                    let pos = read_bigendian(self.instructions, i + 1);
+                    i = pos as usize - 1;
+                }
+                JumpNotTrue => {
+                    let jump = !self.stack_pop_bool()?;
+
+                    let pos = read_bigendian(self.instructions, i + 1);
+                    i += 2;
+
+                    if jump {
+                        i = pos as usize - 1;
+                    }
                 }
             }
+            i += 1;
         }
         Ok(())
     }
@@ -119,6 +130,7 @@ impl<'a> Vm<'a> {
             Equal => a == b,
             NotEqual => a != b,
             GreaterThan => int_or_error(a)? > int_or_error(b)?,
+            LessThan => int_or_error(a)? < int_or_error(b)?,
             other => panic!("Not a binary comp op: {:?}", other),
         };
 
@@ -151,6 +163,10 @@ impl<'a> Vm<'a> {
 
     fn stack_pop_int(&mut self) -> Result<i64, String> {
         self.stack.pop().and_then(int_or_error)
+    }
+
+    fn stack_pop_bool(&mut self) -> Result<bool, String> {
+        self.stack.pop().and_then(bool_or_error)
     }
 }
 
@@ -197,6 +213,15 @@ mod tests {
         assert_eq!(run_vm_test("!true"), boolean(false));
         assert_eq!(run_vm_test("!!true"), boolean(true));
         assert_eq!(run_vm_test("!(-1 > 2)"), boolean(true));
+    }
+
+    #[test]
+    fn test_conditionals() {
+        assert_eq!(run_vm_test("if (true) { 10 } "), int(10));
+        assert_eq!(run_vm_test("if (true) { 10 } else { 20 }"), int(10));
+        assert_eq!(run_vm_test("if (false) { 10 } else { 20 }"), int(20));
+        assert_eq!(run_vm_test("if (1 < 2) { 10 } else { 20 } "), int(10));
+        assert_eq!(run_vm_test("if (1 > 2) { 10 } else { 20 } "), int(20));
     }
 
     fn run_vm_test(input: &str) -> object::Object {

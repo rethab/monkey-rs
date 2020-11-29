@@ -21,6 +21,7 @@ pub enum Op {
     Equal,
     NotEqual,
     GreaterThan,
+    LessThan,
 
     // prefix
     Minus,
@@ -55,6 +56,7 @@ impl TryFrom<u8> for Op {
             x if x == Op::Equal as u8 => Ok(Op::Equal),
             x if x == Op::NotEqual as u8 => Ok(Op::NotEqual),
             x if x == Op::GreaterThan as u8 => Ok(Op::GreaterThan),
+            x if x == Op::LessThan as u8 => Ok(Op::LessThan),
             x if x == Op::Minus as u8 => Ok(Op::Minus),
             x if x == Op::Bang as u8 => Ok(Op::Bang),
             x if x == Op::Pop as u8 => Ok(Op::Pop),
@@ -139,6 +141,10 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpGreaterThan",
                 operand_widths: vec![],
             },
+            LessThan => Definition {
+                name: "OpLessThan",
+                operand_widths: vec![],
+            },
             Minus => Definition {
                 name: "OpMinus",
                 operand_widths: vec![],
@@ -201,6 +207,7 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String) {
         Op::Equal => {}
         Op::NotEqual => {}
         Op::GreaterThan => {}
+        Op::LessThan => {}
         Op::Minus => {}
         Op::Bang => {}
         Op::Pop => {}
@@ -239,6 +246,7 @@ mod tests {
             (Op::Equal, vec![], vec![Op::Equal.byte()]),
             (Op::NotEqual, vec![], vec![Op::NotEqual.byte()]),
             (Op::GreaterThan, vec![], vec![Op::GreaterThan.byte()]),
+            (Op::LessThan, vec![], vec![Op::LessThan.byte()]),
             (Op::Minus, vec![], vec![Op::Minus.byte()]),
             (Op::Bang, vec![], vec![Op::Bang.byte()]),
             (Op::Pop, vec![], vec![Op::Pop.byte()]),
@@ -280,6 +288,7 @@ mod tests {
             make(Op::Equal, &vec![]).unwrap(),
             make(Op::NotEqual, &vec![]).unwrap(),
             make(Op::GreaterThan, &vec![]).unwrap(),
+            make(Op::LessThan, &vec![]).unwrap(),
             make(Op::Minus, &vec![]).unwrap(),
             make(Op::Bang, &vec![]).unwrap(),
             make(Op::JumpNotTrue, &vec![36435]).unwrap(),
@@ -300,10 +309,11 @@ mod tests {
             0016 OpEqual
             0017 OpNotEqual
             0018 OpGreaterThan
-            0019 OpMinus
-            0020 OpBang
-            0021 OpJumpNotTrue 36435
-            0024 OpJump 678
+            0019 OpLessThan
+            0020 OpMinus
+            0021 OpBang
+            0022 OpJumpNotTrue 36435
+            0025 OpJump 678
         "
         .trim()
         .replace("            ", "");
