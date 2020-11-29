@@ -63,11 +63,8 @@ impl Compiler {
                     self.remove_last_pop();
                 }
 
-                // jump over alternative?
-                let mut alt_jump_idx = None;
-                if alternative.is_some() {
-                    alt_jump_idx = Some(self.emit(Op::Jump, &[-1])?);
-                }
+                // jump over alternative
+                let alt_jump_idx = self.emit(Op::Jump, &[-1])?;
 
                 // fix up the jump
                 let after_consequence = self.instructions.len() as i32;
@@ -78,9 +75,12 @@ impl Compiler {
                     if self.last_instruction_is_pop() {
                         self.remove_last_pop();
                     }
-                    let after_alternative = self.instructions.len() as i32;
-                    self.replace_op(alt_jump_idx.unwrap(), Op::Jump, &[after_alternative])?;
+                } else {
+                    self.emit(Op::Null, &[])?;
                 }
+
+                let after_alternative = self.instructions.len() as i32;
+                self.replace_op(alt_jump_idx, Op::Jump, &[after_alternative])?;
             }
             ast::Expression::Infix { op, lhs, rhs, .. } => {
                 self.compile_expression(*lhs)?;
@@ -278,14 +278,18 @@ mod tests {
                 // 0000
                 make(Op::True, &vec![]).unwrap(),
                 // 0001
-                make(Op::JumpNotTrue, &vec![7]).unwrap(),
+                make(Op::JumpNotTrue, &vec![10]).unwrap(),
                 // 0004
                 make(Op::Constant, &vec![0]).unwrap(),
                 // 0007
+                make(Op::Jump, &vec![11]).unwrap(),
+                // 0010
+                make(Op::Null, &vec![]).unwrap(),
+                // 0011
                 make(Op::Pop, &vec![]).unwrap(),
-                // 0008
+                // 0012
                 make(Op::Constant, &vec![1]).unwrap(),
-                // 00011
+                // 00015
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )?;

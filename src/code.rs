@@ -29,6 +29,7 @@ pub enum Op {
 
     // misc
     Pop,
+    Null,
 
     // jumps
     JumpNotTrue,
@@ -60,6 +61,7 @@ impl TryFrom<u8> for Op {
             x if x == Op::Minus as u8 => Ok(Op::Minus),
             x if x == Op::Bang as u8 => Ok(Op::Bang),
             x if x == Op::Pop as u8 => Ok(Op::Pop),
+            x if x == Op::Null as u8 => Ok(Op::Null),
             x if x == Op::JumpNotTrue as u8 => Ok(Op::JumpNotTrue),
             x if x == Op::Jump as u8 => Ok(Op::Jump),
             other => Err(format!("Not an op code: {}", other)),
@@ -157,6 +159,10 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpPop",
                 operand_widths: vec![],
             },
+            Null => Definition {
+                name: "OpNull",
+                operand_widths: vec![],
+            },
             JumpNotTrue => Definition {
                 name: "OpJumpNotTrue",
                 operand_widths: vec![2],
@@ -211,6 +217,7 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String) {
         Op::Minus => {}
         Op::Bang => {}
         Op::Pop => {}
+        Op::Null => {}
     }
 }
 
@@ -250,6 +257,7 @@ mod tests {
             (Op::Minus, vec![], vec![Op::Minus.byte()]),
             (Op::Bang, vec![], vec![Op::Bang.byte()]),
             (Op::Pop, vec![], vec![Op::Pop.byte()]),
+            (Op::Null, vec![], vec![Op::Null.byte()]),
             (
                 Op::JumpNotTrue,
                 vec![65534],
@@ -283,6 +291,7 @@ mod tests {
             make(Op::Mul, &vec![]).unwrap(),
             make(Op::Div, &vec![]).unwrap(),
             make(Op::Pop, &vec![]).unwrap(),
+            make(Op::Null, &vec![]).unwrap(),
             make(Op::True, &vec![]).unwrap(),
             make(Op::False, &vec![]).unwrap(),
             make(Op::Equal, &vec![]).unwrap(),
@@ -304,16 +313,17 @@ mod tests {
             0011 OpMul
             0012 OpDiv
             0013 OpPop
-            0014 OpTrue
-            0015 OpFalse
-            0016 OpEqual
-            0017 OpNotEqual
-            0018 OpGreaterThan
-            0019 OpLessThan
-            0020 OpMinus
-            0021 OpBang
-            0022 OpJumpNotTrue 36435
-            0025 OpJump 678
+            0014 OpNull
+            0015 OpTrue
+            0016 OpFalse
+            0017 OpEqual
+            0018 OpNotEqual
+            0019 OpGreaterThan
+            0020 OpLessThan
+            0021 OpMinus
+            0022 OpBang
+            0023 OpJumpNotTrue 36435
+            0026 OpJump 678
         "
         .trim()
         .replace("            ", "");

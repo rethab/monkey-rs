@@ -71,6 +71,9 @@ impl<'a> Vm<'a> {
                 Pop => {
                     self.stack.pop()?;
                 }
+                Null => {
+                    self.stack.push(object::NULL);
+                }
                 Add | Sub | Mul | Div => {
                     self.run_binary_int_op(op)?;
                 }
@@ -180,6 +183,7 @@ fn int_or_error(obj: object::Object) -> Result<i64, String> {
 fn bool_or_error(obj: object::Object) -> Result<bool, String> {
     match obj {
         object::Object::Boolean(i) => Ok(i),
+        object::NULL => Ok(false),
         other => Err(format!("Expected bool on stack, but got: {:?}", other)),
     }
 }
@@ -222,6 +226,9 @@ mod tests {
         assert_eq!(run_vm_test("if (false) { 10 } else { 20 }"), int(20));
         assert_eq!(run_vm_test("if (1 < 2) { 10 } else { 20 } "), int(10));
         assert_eq!(run_vm_test("if (1 > 2) { 10 } else { 20 } "), int(20));
+        assert_eq!(run_vm_test("if (1 > 2) { 10 } "), null());
+        assert_eq!(run_vm_test("!(if(false){5})"), boolean(true));
+        assert_eq!(run_vm_test("if ((if(false){10})){10} else {20}"), int(20));
     }
 
     fn run_vm_test(input: &str) -> object::Object {
@@ -247,5 +254,9 @@ mod tests {
 
     fn boolean(b: bool) -> object::Object {
         object::Object::Boolean(b)
+    }
+
+    fn null() -> object::Object {
+        object::NULL
     }
 }
