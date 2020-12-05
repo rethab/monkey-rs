@@ -2,6 +2,7 @@ use crate::code::*;
 use crate::compiler::*;
 use crate::object;
 
+use std::collections::HashMap;
 use std::convert::TryInto;
 
 const STACK_SIZE: usize = 2048;
@@ -9,6 +10,7 @@ const STACK_SIZE: usize = 2048;
 pub struct Vm<'a> {
     instructions: &'a Instructions,
     constants: &'a Vec<object::Object>,
+    globals: HashMap<u16, object::Object>,
     stack: Stack,
 }
 
@@ -25,10 +27,10 @@ impl Stack {
         }
     }
 
-    pub fn pop(&mut self) -> Result<object::Object, String> {
+    pub fn pop(&mut self) -> object::Object {
         let object = self.elems[self.sp - 1].clone();
         self.sp -= 1;
-        Ok(object)
+        object
     }
 
     pub fn push(&mut self, obj: object::Object) {
@@ -46,6 +48,7 @@ impl<'a> Vm<'a> {
         Self {
             instructions: b.instructions,
             constants: b.constants,
+            globals: HashMap::new(),
 
             stack: Stack::with_capacity(STACK_SIZE),
         }
@@ -69,7 +72,7 @@ impl<'a> Vm<'a> {
                 True => self.stack.push(object::TRUE),
                 False => self.stack.push(object::FALSE),
                 Pop => {
-                    self.stack.pop()?;
+                    self.stack.pop();
                 }
                 Null => {
                     self.stack.push(object::NULL);
@@ -82,6 +85,21 @@ impl<'a> Vm<'a> {
                 }
                 Minus | Bang => {
                     self.run_unary_op(op)?;
+                }
+                GetGlobal => {
+                    let idx = read_bigendian(self.instructions, i + 1);
+                    let value = self
+                        .globals
+                        .get(&idx)
+                        .unwrap_or_else(|| panic!("Global {} not found", idx));
+                    self.stack.push(value.clone());
+                    i += 2;
+                }
+                SetGlobal => {
+                    let idx = read_bigendian(self.instructions, i + 1);
+                    let value = self.stack.pop();
+                    self.globals.insert(idx, value);
+                    i += 2;
                 }
                 Jump => {
                     let pos = read_bigendian(self.instructions, i + 1);
@@ -126,8 +144,8 @@ impl<'a> Vm<'a> {
     }
 
     fn run_binary_comp_op(&mut self, op: Op) -> Result<(), String> {
-        let b = self.stack.pop()?;
-        let a = self.stack.pop()?;
+        let b = self.stack.pop();
+        let a = self.stack.pop();
         use Op::*;
         let res = match op {
             Equal => a == b,
@@ -142,7 +160,7 @@ impl<'a> Vm<'a> {
     }
 
     fn run_unary_op(&mut self, op: Op) -> Result<(), String> {
-        let a = self.stack.pop()?;
+        let a = self.stack.pop();
         use Op::*;
         let res = match op {
             Minus => object::Object::Integer(-int_or_error(a)?),
@@ -165,11 +183,11 @@ impl<'a> Vm<'a> {
     }
 
     fn stack_pop_int(&mut self) -> Result<i64, String> {
-        self.stack.pop().and_then(int_or_error)
+        int_or_error(self.stack.pop())
     }
 
     fn stack_pop_bool(&mut self) -> Result<bool, String> {
-        self.stack.pop().and_then(bool_or_error)
+        bool_or_error(self.stack.pop())
     }
 }
 

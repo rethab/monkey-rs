@@ -2,9 +2,60 @@ use crate::ast;
 use crate::code::*;
 use crate::object;
 
+use std::collections::HashMap;
+
 struct EmittedInstruction {
     op: Op,
     position: usize,
+}
+
+struct Context {
+    parent: Option<Box<Context>>,
+    values: HashMap<String, u16>,
+    idx: u16,
+}
+
+impl Default for Context {
+    fn default() -> Self {
+        Self {
+            parent: None,
+            values: HashMap::new(),
+            idx: 0,
+        }
+    }
+}
+
+impl Context {
+    fn add(&mut self, ident: ast::Identifier) -> u16 {
+        self.values.insert(ident.value, self.idx);
+        let idx = self.idx;
+        self.idx += 1;
+        idx
+    }
+
+    fn get(&self, ident: ast::Identifier) -> Option<u16> {
+        self.values
+            .get(&ident.value)
+            .cloned()
+            .or_else(|| self.parent.as_ref().and_then(|p| p.get(ident)))
+    }
+
+    fn sub(self) -> Self {
+        Self {
+            idx: self.idx,
+            parent: Some(Box::new(self)),
+            values: HashMap::new(),
+        }
+    }
+
+    fn unsub(mut self) -> Self {
+        if let Some(mut p) = self.parent.take() {
+            p.idx = self.idx;
+            *p
+        } else {
+            self
+        }
+    }
 }
 
 pub struct Compiler {
@@ -25,28 +76,48 @@ type CompileResult<T> = Result<T, String>;
 
 impl Compiler {
     pub fn compile(&mut self, p: ast::Program) -> CompileResult<()> {
+        let mut ctx = Context::default();
         for stmt in p.0 {
-            self.compile_statement(stmt)?;
+            ctx = self.compile_statement(stmt, ctx)?;
         }
         Ok(())
     }
 
-    fn compile_statement(&mut self, stmt: ast::Statement) -> CompileResult<()> {
+    fn compile_statement(
+        &mut self,
+        stmt: ast::Statement,
+        mut ctx: Context,
+    ) -> CompileResult<Context> {
         match stmt {
             ast::Statement::Expression { value, .. } => {
-                self.compile_expression(value)?;
+                ctx = self.compile_expression(value, ctx.sub())?;
+                ctx = ctx.unsub();
                 self.emit(Op::Pop, &[])?;
-                Ok(())
+                Ok(ctx)
             }
             ast::Statement::Block { mut statements, .. } if statements.len() == 1 => {
-                self.compile_statement(statements.remove(0))?;
-                Ok(())
+                ctx = self.compile_statement(statements.remove(0), ctx.sub())?;
+                ctx = ctx.unsub();
+                Ok(ctx)
+            }
+            ast::Statement::Let {
+                name, expression, ..
+            } => {
+                ctx = self.compile_expression(*expression, ctx.sub())?;
+                ctx = ctx.unsub();
+                let idx = ctx.add(name);
+                self.emit(Op::SetGlobal, &[idx as i32])?;
+                Ok(ctx)
             }
             other => unimplemented!("statement: {:?}", other),
         }
     }
 
-    fn compile_expression(&mut self, exp: ast::Expression) -> CompileResult<()> {
+    fn compile_expression(
+        &mut self,
+        exp: ast::Expression,
+        mut ctx: Context,
+    ) -> CompileResult<Context> {
         match exp {
             ast::Expression::If {
                 condition,
@@ -54,11 +125,11 @@ impl Compiler {
                 alternative,
                 ..
             } => {
-                self.compile_expression(*condition)?;
+                ctx = self.compile_expression(*condition, ctx)?;
 
                 // jump over consequence
                 let cons_jump_idx = self.emit(Op::JumpNotTrue, &[-1])?;
-                self.compile_statement(*consequence)?;
+                ctx = self.compile_statement(*consequence, ctx)?;
                 if self.last_instruction_is_pop() {
                     self.remove_last_pop();
                 }
@@ -70,21 +141,24 @@ impl Compiler {
                 let after_consequence = self.instructions.len() as i32;
                 self.replace_op(cons_jump_idx, Op::JumpNotTrue, &[after_consequence])?;
 
-                if let Some(alt) = alternative {
-                    self.compile_statement(*alt)?;
+                ctx = if let Some(alt) = alternative {
+                    ctx = self.compile_statement(*alt, ctx)?;
                     if self.last_instruction_is_pop() {
                         self.remove_last_pop();
                     }
+                    ctx
                 } else {
                     self.emit(Op::Null, &[])?;
-                }
+                    ctx
+                };
 
                 let after_alternative = self.instructions.len() as i32;
                 self.replace_op(alt_jump_idx, Op::Jump, &[after_alternative])?;
+                Ok(ctx)
             }
             ast::Expression::Infix { op, lhs, rhs, .. } => {
-                self.compile_expression(*lhs)?;
-                self.compile_expression(*rhs)?;
+                ctx = self.compile_expression(*lhs, ctx)?;
+                ctx = self.compile_expression(*rhs, ctx)?;
                 let op = match op.as_str() {
                     "+" => Op::Add,
                     "-" => Op::Sub,
@@ -97,28 +171,38 @@ impl Compiler {
                     other => unimplemented!("compile_expression/op: {}", other),
                 };
                 self.emit(op, &[])?;
+                Ok(ctx)
             }
             ast::Expression::Prefix { op, rhs, .. } => {
-                self.compile_expression(*rhs)?;
+                ctx = self.compile_expression(*rhs, ctx)?;
                 let op = match op.as_str() {
                     "-" => Op::Minus,
                     "!" => Op::Bang,
                     other => unimplemented!("compile_expression/op: {}", other),
                 };
                 self.emit(op, &[])?;
+                Ok(ctx)
             }
             ast::Expression::IntLiteral { value, .. } => {
                 let int = object::Object::Integer(value as i64);
                 let pos = self.add_constant(int);
                 self.emit(Op::Constant, &[pos])?;
+                Ok(ctx)
             }
             ast::Expression::BooleanLiteral { value, .. } => {
                 let op = if value { Op::True } else { Op::False };
                 self.emit(op, &[])?;
+                Ok(ctx)
+            }
+            ast::Expression::Identifier(ident) => {
+                let idx = ctx
+                    .get(ident.clone())
+                    .ok_or_else(|| format!("Identifier {:?} not found in context", ident))?;
+                self.emit(Op::GetGlobal, &[idx as i32])?;
+                Ok(ctx)
             }
             other => unimplemented!("compile_expression: {:?}", other),
         }
-        Ok(())
     }
 
     fn emit(&mut self, op: Op, operands: &[i32]) -> CompileResult<usize> {
@@ -315,6 +399,95 @@ mod tests {
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
+    }
+
+    #[test]
+    fn test_global_let_statement() -> Result<(), String> {
+        run_copmiler_test(
+            "let one = 1; let two = 2;",
+            vec![int(1), int(2)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::SetGlobal, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::SetGlobal, &vec![1]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "let one = 1; one;",
+            vec![int(1)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::SetGlobal, &vec![0]).unwrap(),
+                make(Op::GetGlobal, &vec![0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "let one = 1; let two = one; two;",
+            vec![int(1)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::SetGlobal, &vec![0]).unwrap(),
+                make(Op::GetGlobal, &vec![0]).unwrap(),
+                make(Op::SetGlobal, &vec![1]).unwrap(),
+                make(Op::GetGlobal, &vec![1]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_context() {
+        let mut ctx = Context::default();
+        let a_idx = ctx.add(ident("a"));
+        let b_idx = ctx.add(ident("b"));
+        assert_eq!(ctx.get(ident("a")), Some(a_idx));
+        assert_eq!(ctx.get(ident("b")), Some(b_idx));
+
+        // sub
+        ctx = ctx.sub();
+        let a_idx_sub = ctx.add(ident("a"));
+        let c_idx_sub = ctx.add(ident("c"));
+        assert_eq!(ctx.get(ident("a")), Some(a_idx_sub));
+        assert_eq!(ctx.get(ident("b")), Some(b_idx));
+        assert_eq!(ctx.get(ident("c")), Some(c_idx_sub));
+
+        // sub sub
+        ctx = ctx.sub();
+        let a_idx_sub_sub = ctx.add(ident("a"));
+        assert_eq!(ctx.get(ident("a")), Some(a_idx_sub_sub));
+        assert_eq!(ctx.get(ident("b")), Some(b_idx));
+        assert_eq!(ctx.get(ident("c")), Some(c_idx_sub));
+
+        // unsub sub
+        ctx = ctx.unsub();
+        assert_eq!(ctx.get(ident("a")), Some(a_idx_sub));
+        assert_eq!(ctx.get(ident("b")), Some(b_idx));
+        assert_eq!(ctx.get(ident("c")), Some(c_idx_sub));
+
+        // unsub unsub
+        ctx = ctx.unsub();
+        assert_eq!(ctx.get(ident("a")), Some(a_idx));
+        assert_eq!(ctx.get(ident("b")), Some(b_idx));
+        assert_eq!(ctx.get(ident("c")), None);
+
+        // unsub unsub (NOP)
+        ctx = ctx.unsub();
+        assert_eq!(ctx.get(ident("a")), Some(a_idx));
+        assert_eq!(ctx.get(ident("b")), Some(b_idx));
+        assert_eq!(ctx.get(ident("c")), None);
+    }
+
+    fn ident(x: &'static str) -> ast::Identifier {
+        use crate::token::Token;
+        ast::Identifier {
+            token: Token {
+                tpe: String::new(),
+                literal: String::new(),
+            },
+            value: x.to_owned(),
+        }
     }
 
     fn run_copmiler_test(

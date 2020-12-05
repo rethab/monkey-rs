@@ -23,6 +23,10 @@ pub enum Op {
     GreaterThan,
     LessThan,
 
+    // globals
+    GetGlobal,
+    SetGlobal,
+
     // prefix
     Minus,
     Bang,
@@ -58,6 +62,8 @@ impl TryFrom<u8> for Op {
             x if x == Op::NotEqual as u8 => Ok(Op::NotEqual),
             x if x == Op::GreaterThan as u8 => Ok(Op::GreaterThan),
             x if x == Op::LessThan as u8 => Ok(Op::LessThan),
+            x if x == Op::GetGlobal as u8 => Ok(Op::GetGlobal),
+            x if x == Op::SetGlobal as u8 => Ok(Op::SetGlobal),
             x if x == Op::Minus as u8 => Ok(Op::Minus),
             x if x == Op::Bang as u8 => Ok(Op::Bang),
             x if x == Op::Pop as u8 => Ok(Op::Pop),
@@ -90,6 +96,7 @@ pub fn make(op: Op, operands: &[i32]) -> Result<Vec<u8>, String> {
     for (i, o) in operands.iter().enumerate() {
         let width = def.operand_widths[i] as usize;
         match width {
+            // TODO: should the operands just be u16? do we ever pass actual i32?
             2 => push_bigendian(&mut instruction, offset, *o as u16),
             bad => return Err(format!("Unhandled with {}", bad)),
         }
@@ -146,6 +153,14 @@ impl<'a> Into<Definition<'a>> for Op {
             LessThan => Definition {
                 name: "OpLessThan",
                 operand_widths: vec![],
+            },
+            GetGlobal => Definition {
+                name: "OpGetGlobal",
+                operand_widths: vec![2],
+            },
+            SetGlobal => Definition {
+                name: "OpSetGlobal",
+                operand_widths: vec![2],
             },
             Minus => Definition {
                 name: "OpMinus",
@@ -214,6 +229,8 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String) {
         Op::NotEqual => {}
         Op::GreaterThan => {}
         Op::LessThan => {}
+        Op::GetGlobal => {}
+        Op::SetGlobal => {}
         Op::Minus => {}
         Op::Bang => {}
         Op::Pop => {}
@@ -254,6 +271,16 @@ mod tests {
             (Op::NotEqual, vec![], vec![Op::NotEqual.byte()]),
             (Op::GreaterThan, vec![], vec![Op::GreaterThan.byte()]),
             (Op::LessThan, vec![], vec![Op::LessThan.byte()]),
+            (
+                Op::GetGlobal,
+                vec![65534],
+                vec![Op::GetGlobal.byte(), 255, 254],
+            ),
+            (
+                Op::SetGlobal,
+                vec![65534],
+                vec![Op::SetGlobal.byte(), 255, 254],
+            ),
             (Op::Minus, vec![], vec![Op::Minus.byte()]),
             (Op::Bang, vec![], vec![Op::Bang.byte()]),
             (Op::Pop, vec![], vec![Op::Pop.byte()]),
@@ -298,6 +325,8 @@ mod tests {
             make(Op::NotEqual, &vec![]).unwrap(),
             make(Op::GreaterThan, &vec![]).unwrap(),
             make(Op::LessThan, &vec![]).unwrap(),
+            make(Op::GetGlobal, &vec![]).unwrap(),
+            make(Op::SetGlobal, &vec![]).unwrap(),
             make(Op::Minus, &vec![]).unwrap(),
             make(Op::Bang, &vec![]).unwrap(),
             make(Op::JumpNotTrue, &vec![36435]).unwrap(),
@@ -320,10 +349,12 @@ mod tests {
             0018 OpNotEqual
             0019 OpGreaterThan
             0020 OpLessThan
-            0021 OpMinus
-            0022 OpBang
-            0023 OpJumpNotTrue 36435
-            0026 OpJump 678
+            0021 OpGetGlobal
+            0024 OpSetGlobal
+            0027 OpMinus
+            0028 OpBang
+            0029 OpJumpNotTrue 36435
+            0032 OpJump 678
         "
         .trim()
         .replace("            ", "");
