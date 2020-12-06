@@ -9,9 +9,10 @@ struct EmittedInstruction {
     position: usize,
 }
 
-struct Context {
+#[derive(Clone)]
+pub struct Context {
     parent: Option<Box<Context>>,
-    values: HashMap<String, u16>,
+    symbols: HashMap<String, u16>,
     idx: u16,
 }
 
@@ -19,32 +20,32 @@ impl Default for Context {
     fn default() -> Self {
         Self {
             parent: None,
-            values: HashMap::new(),
+            symbols: HashMap::new(),
             idx: 0,
         }
     }
 }
 
 impl Context {
-    fn add(&mut self, ident: ast::Identifier) -> u16 {
-        self.values.insert(ident.value, self.idx);
+    fn define(&mut self, ident: ast::Identifier) -> u16 {
+        self.symbols.insert(ident.value, self.idx);
         let idx = self.idx;
         self.idx += 1;
         idx
     }
 
-    fn get(&self, ident: ast::Identifier) -> Option<u16> {
-        self.values
+    fn resolve(&self, ident: &ast::Identifier) -> Option<u16> {
+        self.symbols
             .get(&ident.value)
             .cloned()
-            .or_else(|| self.parent.as_ref().and_then(|p| p.get(ident)))
+            .or_else(|| self.parent.as_ref().and_then(|p| p.resolve(ident)))
     }
 
     fn sub(self) -> Self {
         Self {
             idx: self.idx,
             parent: Some(Box::new(self)),
-            values: HashMap::new(),
+            symbols: HashMap::new(),
         }
     }
 
@@ -61,6 +62,7 @@ impl Context {
 pub struct Compiler {
     instructions: Instructions,
     constants: Vec<object::Object>,
+    context: Context,
 
     last_instruction: Option<EmittedInstruction>,
     previous_instruction: Option<EmittedInstruction>,
@@ -76,10 +78,11 @@ type CompileResult<T> = Result<T, String>;
 
 impl Compiler {
     pub fn compile(&mut self, p: ast::Program) -> CompileResult<()> {
-        let mut ctx = Context::default();
+        let mut ctx = self.context.clone();
         for stmt in p.0 {
             ctx = self.compile_statement(stmt, ctx)?;
         }
+        self.context = ctx;
         Ok(())
     }
 
@@ -105,7 +108,7 @@ impl Compiler {
             } => {
                 ctx = self.compile_expression(*expression, ctx.sub())?;
                 ctx = ctx.unsub();
-                let idx = ctx.add(name);
+                let idx = ctx.define(name);
                 self.emit(Op::SetGlobal, &[idx as i32])?;
                 Ok(ctx)
             }
@@ -196,8 +199,8 @@ impl Compiler {
             }
             ast::Expression::Identifier(ident) => {
                 let idx = ctx
-                    .get(ident.clone())
-                    .ok_or_else(|| format!("Identifier {:?} not found in context", ident))?;
+                    .resolve(&ident)
+                    .ok_or_else(|| format!("Identifier '{}' not found", ident.value))?;
                 self.emit(Op::GetGlobal, &[idx as i32])?;
                 Ok(ctx)
             }
@@ -278,6 +281,7 @@ impl Default for Compiler {
         Self {
             instructions: Vec::new(),
             constants: Vec::new(),
+            context: Context::default(),
 
             last_instruction: None,
             previous_instruction: None,
@@ -440,43 +444,43 @@ mod tests {
     #[test]
     fn test_context() {
         let mut ctx = Context::default();
-        let a_idx = ctx.add(ident("a"));
-        let b_idx = ctx.add(ident("b"));
-        assert_eq!(ctx.get(ident("a")), Some(a_idx));
-        assert_eq!(ctx.get(ident("b")), Some(b_idx));
+        let a_idx = ctx.define(ident("a"));
+        let b_idx = ctx.define(ident("b"));
+        assert_eq!(ctx.resolve(&ident("a")), Some(a_idx));
+        assert_eq!(ctx.resolve(&ident("b")), Some(b_idx));
 
         // sub
         ctx = ctx.sub();
-        let a_idx_sub = ctx.add(ident("a"));
-        let c_idx_sub = ctx.add(ident("c"));
-        assert_eq!(ctx.get(ident("a")), Some(a_idx_sub));
-        assert_eq!(ctx.get(ident("b")), Some(b_idx));
-        assert_eq!(ctx.get(ident("c")), Some(c_idx_sub));
+        let a_idx_sub = ctx.define(ident("a"));
+        let c_idx_sub = ctx.define(ident("c"));
+        assert_eq!(ctx.resolve(&ident("a")), Some(a_idx_sub));
+        assert_eq!(ctx.resolve(&ident("b")), Some(b_idx));
+        assert_eq!(ctx.resolve(&ident("c")), Some(c_idx_sub));
 
         // sub sub
         ctx = ctx.sub();
-        let a_idx_sub_sub = ctx.add(ident("a"));
-        assert_eq!(ctx.get(ident("a")), Some(a_idx_sub_sub));
-        assert_eq!(ctx.get(ident("b")), Some(b_idx));
-        assert_eq!(ctx.get(ident("c")), Some(c_idx_sub));
+        let a_idx_sub_sub = ctx.define(ident("a"));
+        assert_eq!(ctx.resolve(&ident("a")), Some(a_idx_sub_sub));
+        assert_eq!(ctx.resolve(&ident("b")), Some(b_idx));
+        assert_eq!(ctx.resolve(&ident("c")), Some(c_idx_sub));
 
         // unsub sub
         ctx = ctx.unsub();
-        assert_eq!(ctx.get(ident("a")), Some(a_idx_sub));
-        assert_eq!(ctx.get(ident("b")), Some(b_idx));
-        assert_eq!(ctx.get(ident("c")), Some(c_idx_sub));
+        assert_eq!(ctx.resolve(&ident("a")), Some(a_idx_sub));
+        assert_eq!(ctx.resolve(&ident("b")), Some(b_idx));
+        assert_eq!(ctx.resolve(&ident("c")), Some(c_idx_sub));
 
         // unsub unsub
         ctx = ctx.unsub();
-        assert_eq!(ctx.get(ident("a")), Some(a_idx));
-        assert_eq!(ctx.get(ident("b")), Some(b_idx));
-        assert_eq!(ctx.get(ident("c")), None);
+        assert_eq!(ctx.resolve(&ident("a")), Some(a_idx));
+        assert_eq!(ctx.resolve(&ident("b")), Some(b_idx));
+        assert_eq!(ctx.resolve(&ident("c")), None);
 
         // unsub unsub (NOP)
         ctx = ctx.unsub();
-        assert_eq!(ctx.get(ident("a")), Some(a_idx));
-        assert_eq!(ctx.get(ident("b")), Some(b_idx));
-        assert_eq!(ctx.get(ident("c")), None);
+        assert_eq!(ctx.resolve(&ident("a")), Some(a_idx));
+        assert_eq!(ctx.resolve(&ident("b")), Some(b_idx));
+        assert_eq!(ctx.resolve(&ident("c")), None);
     }
 
     fn ident(x: &'static str) -> ast::Identifier {

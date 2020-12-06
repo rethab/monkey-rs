@@ -249,6 +249,20 @@ mod tests {
         assert_eq!(run_vm_test("if ((if(false){10})){10} else {20}"), int(20));
     }
 
+    #[test]
+    fn test_globals() {
+        assert_eq!(run_vm_test("let one = 1; one"), int(1));
+        assert_eq!(run_vm_test("let one = 1 let two = 2; one + two"), int(3));
+        assert_eq!(
+            run_vm_test("let one = 1 let two = one + one; one + two"),
+            int(3)
+        );
+        assert_eq!(
+            run_vm_test("let one = 1 let two = 2; if (two > one) { two } else { one }"),
+            int(2)
+        );
+    }
+
     fn run_vm_test(input: &str) -> object::Object {
         let p = parse(input);
         let mut c = Compiler::default();

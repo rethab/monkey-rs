@@ -41,14 +41,15 @@ fn eval<T: Interpreter>(line: &str, interpreter: &mut T) {
     match parser.parse_program() {
         Ok(program) => match interpreter.eval(*program) {
             Ok(result) => println!("{}", result.inspect()),
-            Err(err) => println!("Failed to evaluate: {}", err),
+            Err(err) => println!("Failed to {}: {}", interpreter.verb(), err),
         },
-        Err(err) => println!("Failed to pase: {}", err),
+        Err(err) => println!("Failed to parse: {}", err),
     }
 }
 
 trait Interpreter {
-    fn eval(&self, line: ast::Program) -> Result<object::Object, String>;
+    fn eval(&mut self, line: ast::Program) -> Result<object::Object, String>;
+    fn verb(&self) -> &'static str;
 }
 
 struct Evaluator {
@@ -64,18 +65,27 @@ impl Default for Evaluator {
 }
 
 impl Interpreter for Evaluator {
-    fn eval(&self, line: ast::Program) -> Result<object::Object, String> {
+    fn verb(&self) -> &'static str {
+        "evaluate"
+    }
+
+    fn eval(&mut self, line: ast::Program) -> Result<object::Object, String> {
         evaluator::eval(line, Rc::clone(&self.env))
     }
 }
 
-struct VirtualMachine {}
+struct VirtualMachine {
+    compiler: compiler::Compiler,
+}
 
 impl Interpreter for VirtualMachine {
-    fn eval(&self, line: ast::Program) -> Result<object::Object, String> {
-        let mut compiler = compiler::Compiler::default();
-        compiler.compile(line)?;
-        let bytecode = compiler.bytecode();
+    fn verb(&self) -> &'static str {
+        "compile"
+    }
+
+    fn eval(&mut self, line: ast::Program) -> Result<object::Object, String> {
+        self.compiler.compile(line)?;
+        let bytecode = self.compiler.bytecode();
         let mut vm = vm::Vm::new(&bytecode);
         vm.run()?;
         let result = vm.last_popped_stack_elem();
@@ -85,6 +95,8 @@ impl Interpreter for VirtualMachine {
 
 impl Default for VirtualMachine {
     fn default() -> Self {
-        Self {}
+        Self {
+            compiler: compiler::Compiler::default(),
+        }
     }
 }
