@@ -31,6 +31,9 @@ pub enum Op {
     Minus,
     Bang,
 
+    // postfix
+    Index,
+
     // misc
     Pop,
     Null,
@@ -67,6 +70,7 @@ impl TryFrom<u8> for Op {
             x if x == Op::GetGlobal as u8 => Ok(Op::GetGlobal),
             x if x == Op::SetGlobal as u8 => Ok(Op::SetGlobal),
             x if x == Op::Minus as u8 => Ok(Op::Minus),
+            x if x == Op::Index as u8 => Ok(Op::Index),
             x if x == Op::Bang as u8 => Ok(Op::Bang),
             x if x == Op::Pop as u8 => Ok(Op::Pop),
             x if x == Op::Null as u8 => Ok(Op::Null),
@@ -170,6 +174,10 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpMinus",
                 operand_widths: vec![],
             },
+            Index => Definition {
+                name: "OpIndex",
+                operand_widths: vec![],
+            },
             Bang => Definition {
                 name: "OpBang",
                 operand_widths: vec![],
@@ -246,6 +254,7 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String) {
         Op::GreaterThan => {}
         Op::LessThan => {}
         Op::Minus => {}
+        Op::Index => {}
         Op::Bang => {}
         Op::Pop => {}
         Op::Null => {}
@@ -296,6 +305,7 @@ mod tests {
                 vec![Op::SetGlobal.byte(), 255, 254],
             ),
             (Op::Minus, vec![], vec![Op::Minus.byte()]),
+            (Op::Index, vec![], vec![Op::Index.byte()]),
             (Op::Bang, vec![], vec![Op::Bang.byte()]),
             (Op::Pop, vec![], vec![Op::Pop.byte()]),
             (Op::Null, vec![], vec![Op::Null.byte()]),
@@ -344,6 +354,7 @@ mod tests {
             make(Op::GetGlobal, &vec![7657]).unwrap(),
             make(Op::SetGlobal, &vec![8791]).unwrap(),
             make(Op::Minus, &vec![]).unwrap(),
+            make(Op::Index, &vec![]).unwrap(),
             make(Op::Bang, &vec![]).unwrap(),
             make(Op::JumpNotTrue, &vec![36435]).unwrap(),
             make(Op::Jump, &vec![678]).unwrap(),
@@ -370,11 +381,12 @@ mod tests {
             0021 OpGetGlobal 7657
             0024 OpSetGlobal 8791
             0027 OpMinus
-            0028 OpBang
-            0029 OpJumpNotTrue 36435
-            0032 OpJump 678
-            0035 OpArray 8987
-            0038 OpHash 8988
+            0028 OpIndex
+            0029 OpBang
+            0030 OpJumpNotTrue 36435
+            0033 OpJump 678
+            0036 OpArray 8987
+            0039 OpHash 8988
         "
         .trim()
         .replace("            ", "");

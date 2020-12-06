@@ -101,6 +101,27 @@ impl<'a> Vm<'a> {
 
                     i += 2;
                 }
+                Index => {
+                    let index = self.stack.pop();
+                    let container = self.stack.pop();
+
+                    match container {
+                        object::Object::Array(elems) => {
+                            let int_index = int_or_error(index)? as usize;
+                            let value = elems.get(int_index).cloned().unwrap_or(object::NULL);
+                            self.stack.push(value);
+                        }
+                        object::Object::Map(values) => {
+                            let value = values
+                                .into_iter()
+                                .find(|(k, _)| *k == index)
+                                .map(|(_, v)| v)
+                                .unwrap_or(object::NULL);
+                            self.stack.push(value);
+                        }
+                        other => return Err(format!("Cannot index {}", other.inspect())),
+                    }
+                }
                 Add | Sub | Mul | Div => {
                     self.run_binary_op(op)?;
                 }
@@ -310,6 +331,12 @@ mod tests {
             run_vm_test("[1 + 2, 3 * 4, 5 + 6]"),
             array(vec![int(3), int(12), int(11)])
         );
+        assert_eq!(run_vm_test("[1][0]"), int(1));
+        assert_eq!(run_vm_test("[][0]"), null());
+        assert_eq!(run_vm_test("[1, 2, 3][3]"), null());
+        assert_eq!(run_vm_test("[1, 2][1]"), int(2));
+        assert_eq!(run_vm_test("[1, 2, 3][1 + 1]"), int(3));
+        assert_eq!(run_vm_test("let xs = [1, 2, 3]; xs[1]"), int(2));
     }
 
     #[test]
@@ -320,6 +347,11 @@ mod tests {
             run_vm_test("{1 + 1: 2 + 3, 3 + 4: 5 + 6}"),
             hash(vec![(int(2), int(5)), (int(7), int(11))])
         );
+        assert_eq!(run_vm_test("{1: 2}[1]"), int(2));
+        assert_eq!(run_vm_test("{1: 2}[0]"), null());
+        assert_eq!(run_vm_test("{1 + 3: 2 + 4}[2 + 2]"), int(6));
+        assert_eq!(run_vm_test("{1: 2, 3: 4, 2: 6}[3]"), int(4));
+        assert_eq!(run_vm_test("let xs = {1: 2, 3: 4}; xs[1] + xs[3]"), int(6));
     }
 
     #[test]

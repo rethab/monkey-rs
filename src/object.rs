@@ -79,7 +79,7 @@ impl Object {
             }
             Map(vs) => {
                 let mut out = String::new();
-                out.push('[');
+                out.push('{');
                 let mut first = true;
                 for (k, v) in vs {
                     if first {
@@ -89,7 +89,7 @@ impl Object {
                     }
                     out.push_str(&format!("{}: {}", k.inspect(), v.inspect()));
                 }
-                out.push(']');
+                out.push('}');
                 out
             }
             Return(v) => v.inspect(),

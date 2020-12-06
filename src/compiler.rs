@@ -221,6 +221,14 @@ impl Compiler {
                 self.emit(Op::Hash, &[size as i32])?;
                 Ok(ctx)
             }
+            ast::Expression::Index {
+                container, index, ..
+            } => {
+                ctx = self.compile_expression(*container, ctx)?;
+                ctx = self.compile_expression(*index, ctx)?;
+                self.emit(Op::Index, &[])?;
+                Ok(ctx)
+            }
             ast::Expression::Identifier(ident) => {
                 let idx = ctx
                     .resolve(&ident)
@@ -564,6 +572,39 @@ mod tests {
                 make(Op::Constant, &vec![5]).unwrap(),
                 make(Op::Mul, &vec![]).unwrap(),
                 make(Op::Hash, &vec![2]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_index() -> Result<(), String> {
+        run_copmiler_test(
+            "[1, 2, 3][1+1]",
+            vec![int(1), int(2), int(3), int(1), int(1)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Array, &vec![3]).unwrap(),
+                make(Op::Constant, &vec![3]).unwrap(),
+                make(Op::Constant, &vec![4]).unwrap(),
+                make(Op::Add, &vec![]).unwrap(),
+                make(Op::Index, &vec![]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "{1: 2}[2-1]",
+            vec![int(1), int(2), int(2), int(1)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Hash, &vec![1]).unwrap(),
+                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Constant, &vec![3]).unwrap(),
+                make(Op::Sub, &vec![]).unwrap(),
+                make(Op::Index, &vec![]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
