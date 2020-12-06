@@ -34,6 +34,7 @@ pub enum Op {
     // misc
     Pop,
     Null,
+    Array,
 
     // jumps
     JumpNotTrue,
@@ -68,6 +69,7 @@ impl TryFrom<u8> for Op {
             x if x == Op::Bang as u8 => Ok(Op::Bang),
             x if x == Op::Pop as u8 => Ok(Op::Pop),
             x if x == Op::Null as u8 => Ok(Op::Null),
+            x if x == Op::Array as u8 => Ok(Op::Array),
             x if x == Op::JumpNotTrue as u8 => Ok(Op::JumpNotTrue),
             x if x == Op::Jump as u8 => Ok(Op::Jump),
             other => Err(format!("Not an op code: {}", other)),
@@ -178,6 +180,10 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpNull",
                 operand_widths: vec![],
             },
+            Array => Definition {
+                name: "OpArray",
+                operand_widths: vec![2],
+            },
             JumpNotTrue => Definition {
                 name: "OpJumpNotTrue",
                 operand_widths: vec![2],
@@ -219,6 +225,9 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String) {
         Op::Constant => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::JumpNotTrue => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::Jump => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+        Op::GetGlobal => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+        Op::SetGlobal => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+        Op::Array => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::True => {}
         Op::False => {}
         Op::Add => {}
@@ -229,8 +238,6 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String) {
         Op::NotEqual => {}
         Op::GreaterThan => {}
         Op::LessThan => {}
-        Op::GetGlobal => {}
-        Op::SetGlobal => {}
         Op::Minus => {}
         Op::Bang => {}
         Op::Pop => {}
@@ -291,6 +298,7 @@ mod tests {
                 vec![Op::JumpNotTrue.byte(), 255, 254],
             ),
             (Op::Jump, vec![65534], vec![Op::Jump.byte(), 255, 254]),
+            (Op::Array, vec![65534], vec![Op::Array.byte(), 255, 254]),
         ];
 
         for (op, operands, expected) in tests {
@@ -325,12 +333,13 @@ mod tests {
             make(Op::NotEqual, &vec![]).unwrap(),
             make(Op::GreaterThan, &vec![]).unwrap(),
             make(Op::LessThan, &vec![]).unwrap(),
-            make(Op::GetGlobal, &vec![]).unwrap(),
-            make(Op::SetGlobal, &vec![]).unwrap(),
+            make(Op::GetGlobal, &vec![7657]).unwrap(),
+            make(Op::SetGlobal, &vec![8791]).unwrap(),
             make(Op::Minus, &vec![]).unwrap(),
             make(Op::Bang, &vec![]).unwrap(),
             make(Op::JumpNotTrue, &vec![36435]).unwrap(),
             make(Op::Jump, &vec![678]).unwrap(),
+            make(Op::Array, &vec![8987]).unwrap(),
         ];
 
         let expected = "
@@ -349,12 +358,13 @@ mod tests {
             0018 OpNotEqual
             0019 OpGreaterThan
             0020 OpLessThan
-            0021 OpGetGlobal
-            0024 OpSetGlobal
+            0021 OpGetGlobal 7657
+            0024 OpSetGlobal 8791
             0027 OpMinus
             0028 OpBang
             0029 OpJumpNotTrue 36435
             0032 OpJump 678
+            0035 OpArray 8987
         "
         .trim()
         .replace("            ", "");

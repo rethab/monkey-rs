@@ -77,6 +77,17 @@ impl<'a> Vm<'a> {
                 Null => {
                     self.stack.push(object::NULL);
                 }
+                Array => {
+                    let length = read_bigendian(self.instructions, i + 1);
+                    let mut array = Vec::with_capacity(length as usize);
+                    for _ in 0..length {
+                        array.push(self.stack.pop());
+                    }
+                    array.reverse();
+                    self.stack.push(object::Object::Array(array));
+
+                    i += 2;
+                }
                 Add | Sub | Mul | Div => {
                     self.run_binary_op(op)?;
                 }
@@ -269,13 +280,23 @@ mod tests {
     }
 
     #[test]
-    fn test_string_operatins() {
+    fn test_string_operations() {
         assert_eq!(run_vm_test("\"hello\""), string("hello"));
         assert_eq!(run_vm_test("\"hel\" +\"lo\""), string("hello"));
         assert_eq!(run_vm_test("\"hel\" +\"l\" + \"o\""), string("hello"));
         assert_eq!(run_vm_test("(\"hel\" +\"l\") == \"hello\""), boolean(false));
         assert_eq!(run_vm_test("\"he\" == \"he\""), boolean(true));
         assert_eq!(run_vm_test("\"he\" != \"he\""), boolean(false));
+    }
+
+    #[test]
+    fn test_arrays() {
+        assert_eq!(run_vm_test("[]"), array(vec![]));
+        assert_eq!(run_vm_test("[1]"), array(vec![int(1)]));
+        assert_eq!(
+            run_vm_test("[1 + 2, 3 * 4, 5 + 6]"),
+            array(vec![int(3), int(12), int(11)])
+        );
     }
 
     #[test]
@@ -327,6 +348,10 @@ mod tests {
 
     fn string(string: &'static str) -> object::Object {
         object::Object::String_(string.to_owned())
+    }
+
+    fn array(elems: Vec<object::Object>) -> object::Object {
+        object::Object::Array(elems)
     }
 
     fn boolean(b: bool) -> object::Object {

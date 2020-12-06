@@ -203,6 +203,15 @@ impl Compiler {
                 self.emit(Op::Constant, &[pos])?;
                 Ok(ctx)
             }
+            ast::Expression::ArrayLiteral { values, .. } => {
+                let size = values.len();
+                for value in values {
+                    // TODO: re-assigning the context here is probably not correct because it would allow to define a new symbol as part of an element in the array and then re-use it in a subsequent expression. but such a construct might not be possible in practice
+                    ctx = self.compile_expression(value, ctx)?;
+                }
+                self.emit(Op::Array, &[size as i32])?;
+                Ok(ctx)
+            }
             ast::Expression::Identifier(ident) => {
                 let idx = ctx
                     .resolve(&ident)
@@ -464,6 +473,46 @@ mod tests {
                 make(Op::GetGlobal, &vec![0]).unwrap(),
                 make(Op::SetGlobal, &vec![1]).unwrap(),
                 make(Op::GetGlobal, &vec![1]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_arrays() -> Result<(), String> {
+        run_copmiler_test(
+            "[1]",
+            vec![int(1)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Array, &vec![1]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "[1, 2]",
+            vec![int(1), int(2)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Array, &vec![2]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "[1 + 2, 3 - 4, 5 * 6]",
+            vec![int(1), int(2), int(3), int(4), int(5), int(6)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Add, &vec![]).unwrap(),
+                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Constant, &vec![3]).unwrap(),
+                make(Op::Sub, &vec![]).unwrap(),
+                make(Op::Constant, &vec![4]).unwrap(),
+                make(Op::Constant, &vec![5]).unwrap(),
+                make(Op::Mul, &vec![]).unwrap(),
+                make(Op::Array, &vec![3]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
