@@ -212,6 +212,15 @@ impl Compiler {
                 self.emit(Op::Array, &[size as i32])?;
                 Ok(ctx)
             }
+            ast::Expression::MapLiteral { values, .. } => {
+                let size = values.len();
+                for (key, value) in values {
+                    ctx = self.compile_expression(key, ctx)?;
+                    ctx = self.compile_expression(value, ctx)?;
+                }
+                self.emit(Op::Hash, &[size as i32])?;
+                Ok(ctx)
+            }
             ast::Expression::Identifier(ident) => {
                 let idx = ctx
                     .resolve(&ident)
@@ -513,6 +522,48 @@ mod tests {
                 make(Op::Constant, &vec![5]).unwrap(),
                 make(Op::Mul, &vec![]).unwrap(),
                 make(Op::Array, &vec![3]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_hash() -> Result<(), String> {
+        run_copmiler_test(
+            "{}",
+            vec![],
+            vec![
+                make(Op::Hash, &vec![0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "{1: 2, 3: 4, 5:6}",
+            vec![int(1), int(2), int(3), int(4), int(5), int(6)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Constant, &vec![3]).unwrap(),
+                make(Op::Constant, &vec![4]).unwrap(),
+                make(Op::Constant, &vec![5]).unwrap(),
+                make(Op::Hash, &vec![3]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "{1: 2+3, 4: 5 * 6}",
+            vec![int(1), int(2), int(3), int(4), int(5), int(6)],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Add, &vec![]).unwrap(),
+                make(Op::Constant, &vec![3]).unwrap(),
+                make(Op::Constant, &vec![4]).unwrap(),
+                make(Op::Constant, &vec![5]).unwrap(),
+                make(Op::Mul, &vec![]).unwrap(),
+                make(Op::Hash, &vec![2]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )

@@ -88,6 +88,19 @@ impl<'a> Vm<'a> {
 
                     i += 2;
                 }
+                Hash => {
+                    let length = read_bigendian(self.instructions, i + 1);
+                    let mut hash = Vec::with_capacity((length / 2) as usize);
+                    for _ in 0..length {
+                        let value = self.stack.pop();
+                        let key = self.stack.pop();
+                        hash.push((key, value));
+                    }
+                    hash.reverse();
+                    self.stack.push(object::Object::Map(hash));
+
+                    i += 2;
+                }
                 Add | Sub | Mul | Div => {
                     self.run_binary_op(op)?;
                 }
@@ -300,6 +313,16 @@ mod tests {
     }
 
     #[test]
+    fn test_hash() {
+        assert_eq!(run_vm_test("{}"), hash(vec![]));
+        assert_eq!(run_vm_test("{1: 2}"), hash(vec![(int(1), int(2))]));
+        assert_eq!(
+            run_vm_test("{1 + 1: 2 + 3, 3 + 4: 5 + 6}"),
+            hash(vec![(int(2), int(5)), (int(7), int(11))])
+        );
+    }
+
+    #[test]
     fn test_conditionals() {
         assert_eq!(run_vm_test("if (true) { 10 } "), int(10));
         assert_eq!(run_vm_test("if (true) { 10 } else { 20 }"), int(10));
@@ -352,6 +375,10 @@ mod tests {
 
     fn array(elems: Vec<object::Object>) -> object::Object {
         object::Object::Array(elems)
+    }
+
+    fn hash(elems: Vec<(object::Object, object::Object)>) -> object::Object {
+        object::Object::Map(elems)
     }
 
     fn boolean(b: bool) -> object::Object {

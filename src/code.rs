@@ -35,6 +35,7 @@ pub enum Op {
     Pop,
     Null,
     Array,
+    Hash,
 
     // jumps
     JumpNotTrue,
@@ -70,6 +71,7 @@ impl TryFrom<u8> for Op {
             x if x == Op::Pop as u8 => Ok(Op::Pop),
             x if x == Op::Null as u8 => Ok(Op::Null),
             x if x == Op::Array as u8 => Ok(Op::Array),
+            x if x == Op::Hash as u8 => Ok(Op::Hash),
             x if x == Op::JumpNotTrue as u8 => Ok(Op::JumpNotTrue),
             x if x == Op::Jump as u8 => Ok(Op::Jump),
             other => Err(format!("Not an op code: {}", other)),
@@ -184,6 +186,10 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpArray",
                 operand_widths: vec![2],
             },
+            Hash => Definition {
+                name: "OpHash",
+                operand_widths: vec![2],
+            },
             JumpNotTrue => Definition {
                 name: "OpJumpNotTrue",
                 operand_widths: vec![2],
@@ -228,6 +234,7 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String) {
         Op::GetGlobal => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::SetGlobal => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::Array => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+        Op::Hash => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::True => {}
         Op::False => {}
         Op::Add => {}
@@ -299,6 +306,7 @@ mod tests {
             ),
             (Op::Jump, vec![65534], vec![Op::Jump.byte(), 255, 254]),
             (Op::Array, vec![65534], vec![Op::Array.byte(), 255, 254]),
+            (Op::Hash, vec![65534], vec![Op::Hash.byte(), 255, 254]),
         ];
 
         for (op, operands, expected) in tests {
@@ -340,6 +348,7 @@ mod tests {
             make(Op::JumpNotTrue, &vec![36435]).unwrap(),
             make(Op::Jump, &vec![678]).unwrap(),
             make(Op::Array, &vec![8987]).unwrap(),
+            make(Op::Hash, &vec![8988]).unwrap(),
         ];
 
         let expected = "
@@ -365,6 +374,7 @@ mod tests {
             0029 OpJumpNotTrue 36435
             0032 OpJump 678
             0035 OpArray 8987
+            0038 OpHash 8988
         "
         .trim()
         .replace("            ", "");
