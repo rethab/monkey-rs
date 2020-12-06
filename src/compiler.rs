@@ -197,6 +197,12 @@ impl Compiler {
                 self.emit(op, &[])?;
                 Ok(ctx)
             }
+            ast::Expression::StringLiteral { value, .. } => {
+                let string = object::Object::String_(value);
+                let pos = self.add_constant(string);
+                self.emit(Op::Constant, &[pos])?;
+                Ok(ctx)
+            }
             ast::Expression::Identifier(ident) => {
                 let idx = ctx
                     .resolve(&ident)
@@ -352,6 +358,28 @@ mod tests {
             vec![
                 make(Op::Constant, &vec![0]).unwrap(),
                 make(Op::Minus, &vec![]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_string_expression() -> Result<(), String> {
+        run_copmiler_test(
+            "\"monkey\"",
+            vec![string("monkey".to_owned())],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "\"mon\" + \"key\"",
+            vec![string("mon".to_owned()), string("key".to_owned())],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Add, &vec![]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
@@ -570,6 +598,10 @@ mod tests {
 
     fn int(i: i64) -> object::Object {
         object::Object::Integer(i)
+    }
+
+    fn string(string: String) -> object::Object {
+        object::Object::String_(string)
     }
 
     fn display_flat_instructions(instructions: Vec<u8>) -> String {
