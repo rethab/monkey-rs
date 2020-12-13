@@ -1,4 +1,5 @@
 use super::ast;
+use super::code::Instructions;
 use super::environment::Environment;
 use std::cell::RefCell;
 use std::fmt;
@@ -19,6 +20,7 @@ pub enum Object {
         body: Box<ast::Statement>,
         env: Rc<RefCell<Environment>>,
     },
+    CompiledFunction(Instructions),
     Builtin {
         func: fn(Vec<Object>) -> Result<Object, String>,
     },
@@ -32,6 +34,7 @@ const STRING_OBJ: &str = "STRING";
 const NULL_OBJ: &str = "NULL";
 const RETURN_OBJ: &str = "RETURN";
 const FUNCTION_OBJ: &str = "FUNCTION";
+const COMPILED_FUNCTION_OBJ: &str = "COMPILED_FUNCTION";
 const BUILTIN_OBJ: &str = "BUILTIN";
 const ARRAY_OBJ: &str = "ARRAY";
 const MAP_OBJ: &str = "MAP";
@@ -52,6 +55,7 @@ impl Object {
             Null => NULL_OBJ.into(),
             Return(_) => RETURN_OBJ.into(),
             Function { .. } => FUNCTION_OBJ.into(),
+            CompiledFunction(_) => COMPILED_FUNCTION_OBJ.into(),
             Builtin { .. } => BUILTIN_OBJ.into(),
         })
     }
@@ -95,6 +99,7 @@ impl Object {
             Return(v) => v.inspect(),
             Null => String::from("null"),
             Builtin { .. } => "builtin".into(),
+            CompiledFunction(_) => "CompiledFunction[..]".into(),
             Function {
                 parameters, body, ..
             } => {

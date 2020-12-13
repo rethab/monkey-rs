@@ -43,6 +43,11 @@ pub enum Op {
     // jumps
     JumpNotTrue,
     Jump,
+
+    // functions
+    Call,
+    ReturnValue,
+    Return,
 }
 
 impl Op {
@@ -78,6 +83,9 @@ impl TryFrom<u8> for Op {
             x if x == Op::Hash as u8 => Ok(Op::Hash),
             x if x == Op::JumpNotTrue as u8 => Ok(Op::JumpNotTrue),
             x if x == Op::Jump as u8 => Ok(Op::Jump),
+            x if x == Op::Call as u8 => Ok(Op::Call),
+            x if x == Op::ReturnValue as u8 => Ok(Op::ReturnValue),
+            x if x == Op::Return as u8 => Ok(Op::Return),
             other => Err(format!("Not an op code: {}", other)),
         }
     }
@@ -106,6 +114,7 @@ pub fn make(op: Op, operands: &[i32]) -> Result<Vec<u8>, String> {
         match width {
             // TODO: should the operands just be u16? do we ever pass actual i32?
             2 => push_bigendian(&mut instruction, offset, *o as u16),
+            // TODO this should probably panic instead
             bad => return Err(format!("Unhandled with {}", bad)),
         }
         offset += width;
@@ -206,6 +215,18 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpJump",
                 operand_widths: vec![2],
             },
+            Call => Definition {
+                name: "OpCall",
+                operand_widths: vec![],
+            },
+            ReturnValue => Definition {
+                name: "OpReturnValue",
+                operand_widths: vec![],
+            },
+            Return => Definition {
+                name: "OpReturn",
+                operand_widths: vec![],
+            },
         }
     }
 }
@@ -243,6 +264,9 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String) {
         Op::SetGlobal => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::Array => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::Hash => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
+        Op::Call => {}
+        Op::ReturnValue => {}
+        Op::Return => {}
         Op::True => {}
         Op::False => {}
         Op::Add => {}
@@ -315,6 +339,9 @@ mod tests {
                 vec![Op::JumpNotTrue.byte(), 255, 254],
             ),
             (Op::Jump, vec![65534], vec![Op::Jump.byte(), 255, 254]),
+            (Op::Call, vec![], vec![Op::Call.byte()]),
+            (Op::ReturnValue, vec![], vec![Op::ReturnValue.byte()]),
+            (Op::Return, vec![], vec![Op::Return.byte()]),
             (Op::Array, vec![65534], vec![Op::Array.byte(), 255, 254]),
             (Op::Hash, vec![65534], vec![Op::Hash.byte(), 255, 254]),
         ];
@@ -358,6 +385,9 @@ mod tests {
             make(Op::Bang, &vec![]).unwrap(),
             make(Op::JumpNotTrue, &vec![36435]).unwrap(),
             make(Op::Jump, &vec![678]).unwrap(),
+            make(Op::Call, &vec![]).unwrap(),
+            make(Op::ReturnValue, &vec![]).unwrap(),
+            make(Op::Return, &vec![]).unwrap(),
             make(Op::Array, &vec![8987]).unwrap(),
             make(Op::Hash, &vec![8988]).unwrap(),
         ];
@@ -385,8 +415,11 @@ mod tests {
             0029 OpBang
             0030 OpJumpNotTrue 36435
             0033 OpJump 678
-            0036 OpArray 8987
-            0039 OpHash 8988
+            0036 OpCall
+            0037 OpReturnValue
+            0038 OpReturn
+            0039 OpArray 8987
+            0042 OpHash 8988
         "
         .trim()
         .replace("            ", "");

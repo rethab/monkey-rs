@@ -54,18 +54,22 @@ impl Context {
             p.idx = self.idx;
             *p
         } else {
+            // TODO should this panic?
             self
         }
     }
 }
 
-pub struct Compiler {
+struct CompilationScope {
     instructions: Instructions,
-    constants: Vec<object::Object>,
-    context: Context,
-
     last_instruction: Option<EmittedInstruction>,
     previous_instruction: Option<EmittedInstruction>,
+}
+
+pub struct Compiler {
+    scopes: Vec<CompilationScope>,
+    constants: Vec<object::Object>,
+    context: Context,
 }
 
 #[derive(Clone)]
@@ -98,8 +102,11 @@ impl Compiler {
                 self.emit(Op::Pop, &[])?;
                 Ok(ctx)
             }
-            ast::Statement::Block { mut statements, .. } if statements.len() == 1 => {
-                ctx = self.compile_statement(statements.remove(0), ctx.sub())?;
+            ast::Statement::Block { statements, .. } => {
+                ctx = ctx.sub();
+                for stmt in statements.into_iter() {
+                    ctx = self.compile_statement(stmt, ctx)?;
+                }
                 ctx = ctx.unsub();
                 Ok(ctx)
             }
@@ -112,7 +119,12 @@ impl Compiler {
                 self.emit(Op::SetGlobal, &[idx as i32])?;
                 Ok(ctx)
             }
-            other => unimplemented!("statement: {:?}", other),
+            ast::Statement::Return { value, .. } => {
+                ctx = self.compile_expression(value, ctx.sub())?;
+                ctx = ctx.unsub();
+                self.emit(Op::ReturnValue, &[])?;
+                Ok(ctx)
+            }
         }
     }
 
@@ -133,20 +145,22 @@ impl Compiler {
                 // jump over consequence
                 let cons_jump_idx = self.emit(Op::JumpNotTrue, &[-1])?;
                 ctx = self.compile_statement(*consequence, ctx)?;
-                if self.last_instruction_is_pop() {
+                if self.last_instruction_is(Op::Pop) {
                     self.remove_last_pop();
                 }
 
                 // jump over alternative
                 let alt_jump_idx = self.emit(Op::Jump, &[-1])?;
 
+                let scope = self.current_scope();
+
                 // fix up the jump
-                let after_consequence = self.instructions.len() as i32;
+                let after_consequence = scope.instructions.len() as i32;
                 self.replace_op(cons_jump_idx, Op::JumpNotTrue, &[after_consequence])?;
 
                 ctx = if let Some(alt) = alternative {
                     ctx = self.compile_statement(*alt, ctx)?;
-                    if self.last_instruction_is_pop() {
+                    if self.last_instruction_is(Op::Pop) {
                         self.remove_last_pop();
                     }
                     ctx
@@ -155,7 +169,8 @@ impl Compiler {
                     ctx
                 };
 
-                let after_alternative = self.instructions.len() as i32;
+                let scope = self.current_scope();
+                let after_alternative = scope.instructions.len() as i32;
                 self.replace_op(alt_jump_idx, Op::Jump, &[after_alternative])?;
                 Ok(ctx)
             }
@@ -236,6 +251,24 @@ impl Compiler {
                 self.emit(Op::GetGlobal, &[idx as i32])?;
                 Ok(ctx)
             }
+            ast::Expression::FunctionLiteral { body, .. } => {
+                self.enter_scope();
+                ctx = self.compile_statement(*body, ctx.sub())?;
+                ctx = ctx.unsub();
+                // implicit return
+                if self.last_instruction_is(Op::Pop) {
+                    self.remove_last_pop();
+                    self.emit(Op::ReturnValue, &[])?;
+                }
+                if !self.last_instruction_is(Op::ReturnValue) {
+                    self.emit(Op::Return, &[])?;
+                }
+                let instructions = self.leave_scope().instructions;
+                let function = object::Object::CompiledFunction(instructions);
+                let idx = self.add_constant(function);
+                self.emit(Op::Constant, &[idx])?;
+                Ok(ctx)
+            }
             other => unimplemented!("compile_expression: {:?}", other),
         }
     }
@@ -249,31 +282,35 @@ impl Compiler {
     }
 
     fn replace_op(&mut self, mut idx: usize, op: Op, operands: &[i32]) -> CompileResult<()> {
+        let scope = self.current_scope_mut();
         let instruction = make(op, operands)?;
         for ins in instruction {
-            self.instructions[idx] = ins;
+            scope.instructions[idx] = ins;
             idx += 1;
         }
         Ok(())
     }
 
     fn set_last_instruction(&mut self, op: Op, position: usize) {
-        if let Some(last) = self.last_instruction.take() {
-            self.previous_instruction = Some(last);
+        let scope = self.current_scope_mut();
+        if let Some(last) = scope.last_instruction.take() {
+            scope.previous_instruction = Some(last);
         }
-        self.last_instruction = Some(EmittedInstruction { op, position });
+        scope.last_instruction = Some(EmittedInstruction { op, position });
     }
 
-    fn last_instruction_is_pop(&self) -> bool {
-        if let Some(last) = &self.last_instruction {
-            last.op == Op::Pop
+    fn last_instruction_is(&self, op: Op) -> bool {
+        let scope = self.current_scope();
+        if let Some(last) = &scope.last_instruction {
+            last.op == op
         } else {
             false
         }
     }
 
     fn remove_last_pop(&mut self) {
-        let last_emitted = self
+        let scope = self.current_scope_mut();
+        let last_emitted = scope
             .last_instruction
             .take()
             .unwrap_or_else(|| panic!("last instruction not set"));
@@ -282,16 +319,17 @@ impl Compiler {
             panic!("Last op is not Pop, but {:?}", last_emitted.op);
         }
 
-        self.instructions.drain(last_emitted.position..);
+        scope.instructions.drain(last_emitted.position..);
 
-        if let Some(previous) = self.previous_instruction.take() {
-            self.last_instruction = Some(previous);
+        if let Some(previous) = scope.previous_instruction.take() {
+            scope.last_instruction = Some(previous);
         }
     }
 
     fn add_instruction(&mut self, ins: &[u8]) -> usize {
-        let pos = self.instructions.len();
-        self.instructions.extend(ins);
+        let scope = self.current_scope_mut();
+        let pos = scope.instructions.len();
+        scope.instructions.extend(ins);
         pos
     }
 
@@ -300,9 +338,29 @@ impl Compiler {
         (self.constants.len() - 1) as i32
     }
 
+    fn current_scope_mut(&mut self) -> &mut CompilationScope {
+        let idx = self.scopes.len() - 1;
+        &mut self.scopes[idx]
+    }
+
+    fn current_scope(&self) -> &CompilationScope {
+        &self.scopes[self.scopes.len() - 1]
+    }
+
+    fn enter_scope(&mut self) {
+        self.scopes.push(CompilationScope::default());
+    }
+
+    fn leave_scope(&mut self) -> CompilationScope {
+        self.scopes
+            .pop()
+            .unwrap_or_else(|| panic!("cannot leave scope that was not entered.."))
+    }
+
     pub fn bytecode(&self) -> Bytecode {
+        let scope = self.current_scope();
         Bytecode {
-            instructions: &self.instructions,
+            instructions: &scope.instructions,
             constants: &self.constants,
         }
     }
@@ -311,10 +369,17 @@ impl Compiler {
 impl Default for Compiler {
     fn default() -> Self {
         Self {
-            instructions: Vec::new(),
-            constants: Vec::new(),
+            scopes: vec![CompilationScope::default()],
+            constants: vec![],
             context: Context::default(),
+        }
+    }
+}
 
+impl Default for CompilationScope {
+    fn default() -> Self {
+        Self {
+            instructions: vec![],
             last_instruction: None,
             previous_instruction: None,
         }
@@ -611,6 +676,69 @@ mod tests {
     }
 
     #[test]
+    fn test_functions() -> Result<(), String> {
+        run_copmiler_test(
+            "fn() { return 5 + 10 }",
+            vec![
+                int(5),
+                int(10),
+                function(vec![
+                    make(Op::Constant, &vec![0]).unwrap(),
+                    make(Op::Constant, &vec![1]).unwrap(),
+                    make(Op::Add, &vec![]).unwrap(),
+                    make(Op::ReturnValue, &vec![]).unwrap(),
+                ]),
+            ],
+            vec![
+                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "fn() { 5 + 10 }",
+            vec![
+                int(5),
+                int(10),
+                function(vec![
+                    make(Op::Constant, &vec![0]).unwrap(),
+                    make(Op::Constant, &vec![1]).unwrap(),
+                    make(Op::Add, &vec![]).unwrap(),
+                    make(Op::ReturnValue, &vec![]).unwrap(),
+                ]),
+            ],
+            vec![
+                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "fn() { 1; 2}",
+            vec![
+                int(1),
+                int(2),
+                function(vec![
+                    make(Op::Constant, &vec![0]).unwrap(),
+                    make(Op::Pop, &vec![]).unwrap(),
+                    make(Op::Constant, &vec![1]).unwrap(),
+                    make(Op::ReturnValue, &vec![]).unwrap(),
+                ]),
+            ],
+            vec![
+                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "fn() { }",
+            vec![function(vec![make(Op::Return, &vec![]).unwrap()])],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
     fn test_context() {
         let mut ctx = Context::default();
         let a_idx = ctx.define(ident("a"));
@@ -739,6 +867,10 @@ mod tests {
 
     fn int(i: i64) -> object::Object {
         object::Object::Integer(i)
+    }
+
+    fn function(instructions: Vec<Instructions>) -> object::Object {
+        object::Object::CompiledFunction(flatten(instructions))
     }
 
     fn string(string: String) -> object::Object {

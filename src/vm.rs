@@ -160,6 +160,9 @@ impl<'a> Vm<'a> {
                         i = pos as usize - 1;
                     }
                 }
+                Call | ReturnValue | Return => {
+                    unimplemented!()
+                }
             }
             i += 1;
         }
