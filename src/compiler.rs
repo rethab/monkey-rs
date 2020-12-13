@@ -9,7 +9,7 @@ struct EmittedInstruction {
     position: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Context {
     parent: Option<Box<Context>>,
     symbols: HashMap<String, u16>,
@@ -252,25 +252,48 @@ impl Compiler {
                 Ok(ctx)
             }
             ast::Expression::FunctionLiteral { body, .. } => {
-                self.enter_scope();
-                ctx = self.compile_statement(*body, ctx.sub())?;
-                ctx = ctx.unsub();
-                // implicit return
-                if self.last_instruction_is(Op::Pop) {
-                    self.remove_last_pop();
-                    self.emit(Op::ReturnValue, &[])?;
-                }
-                if !self.last_instruction_is(Op::ReturnValue) {
-                    self.emit(Op::Return, &[])?;
-                }
-                let instructions = self.leave_scope().instructions;
-                let function = object::Object::CompiledFunction(instructions);
-                let idx = self.add_constant(function);
-                self.emit(Op::Constant, &[idx])?;
+                self.compile_function_literal(*body, ctx)
+            }
+            ast::Expression::Call { function, .. } => {
+                let ctx = match function {
+                    ast::Function::Identifier(ident) => {
+                        let idx = ctx
+                            .resolve(&ident)
+                            .ok_or_else(|| format!("Function '{}' not found", ident.value))?;
+                        self.emit(Op::GetGlobal, &[idx as i32])?;
+                        ctx
+                    }
+                    ast::Function::Literal { body, .. } => {
+                        self.compile_function_literal(*body, ctx)?
+                    }
+                };
+                self.emit(Op::Call, &[])?;
                 Ok(ctx)
             }
-            other => unimplemented!("compile_expression: {:?}", other),
         }
+    }
+
+    fn compile_function_literal(
+        &mut self,
+        body: ast::Statement,
+        mut ctx: Context,
+    ) -> Result<Context, String> {
+        self.enter_scope();
+        ctx = self.compile_statement(body, ctx.sub())?;
+        ctx = ctx.unsub();
+        // implicit return
+        if self.last_instruction_is(Op::Pop) {
+            self.remove_last_pop();
+            self.emit(Op::ReturnValue, &[])?;
+        }
+        if !self.last_instruction_is(Op::ReturnValue) {
+            self.emit(Op::Return, &[])?;
+        }
+        let instructions = self.leave_scope().instructions;
+        let function = object::Object::CompiledFunction(instructions);
+        let idx = self.add_constant(function);
+        self.emit(Op::Constant, &[idx])?;
+        Ok(ctx)
     }
 
     fn emit(&mut self, op: Op, operands: &[i32]) -> CompileResult<usize> {
@@ -733,6 +756,42 @@ mod tests {
             vec![function(vec![make(Op::Return, &vec![]).unwrap()])],
             vec![
                 make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_function_calls() -> Result<(), String> {
+        run_copmiler_test(
+            "let noArg = fn() { 24 }; noArg()",
+            vec![
+                int(24),
+                function(vec![
+                    make(Op::Constant, &vec![0]).unwrap(),
+                    make(Op::ReturnValue, &vec![]).unwrap(),
+                ]),
+            ],
+            vec![
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::SetGlobal, &vec![0]).unwrap(),
+                make(Op::GetGlobal, &vec![0]).unwrap(),
+                make(Op::Call, &vec![]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "fn() { 24 }();",
+            vec![
+                int(24),
+                function(vec![
+                    make(Op::Constant, &vec![0]).unwrap(),
+                    make(Op::ReturnValue, &vec![]).unwrap(),
+                ]),
+            ],
+            vec![
+                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Call, &vec![]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
