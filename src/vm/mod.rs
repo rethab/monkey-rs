@@ -1,3 +1,5 @@
+pub mod frame;
+
 use crate::code::*;
 use crate::compiler::*;
 use crate::object;
