@@ -1,13 +1,13 @@
 use super::super::code;
 use std::fmt;
 
-pub struct Frame<'a> {
-    pub instructions: &'a [u8],
+pub struct Frame {
+    pub instructions: code::Instructions,
     pub ip: i32,
 }
 
-impl<'a> Frame<'a> {
-    pub fn new(instructions: &'a [u8]) -> Self {
+impl Frame {
+    pub fn new(instructions: code::Instructions) -> Self {
         Self {
             instructions,
             ip: -1,
@@ -39,12 +39,11 @@ impl<'a> Frame<'a> {
     }
 
     pub fn read_bigendian(&self) -> u16 {
-        let instructions = self.instructions;
-        code::read_bigendian(instructions, (self.ip as usize) + 1)
+        code::read_bigendian(&self.instructions, (self.ip as usize) + 1)
     }
 }
 
-impl<'a> fmt::Display for Frame<'a> {
+impl<'a> fmt::Display for Frame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         writeln!(f, "ip={}", self.ip)?;
         writeln!(

@@ -22,6 +22,10 @@ impl Stack {
         object
     }
 
+    pub fn peek(&mut self) -> &object::Object {
+        &self.elems[self.sp - 1]
+    }
+
     pub fn push(&mut self, obj: object::Object) {
         self.elems[self.sp] = obj;
         self.sp += 1;

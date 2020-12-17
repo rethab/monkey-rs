@@ -13,7 +13,7 @@ use std::convert::TryInto;
 const MAX_FRAMES: usize = 1024;
 
 pub struct Vm<'a> {
-    frames: Vec<Frame<'a>>,
+    frames: Vec<Frame>,
     constants: &'a Vec<object::Object>,
     globals: HashMap<u16, object::Object>,
     stack: Stack,
@@ -21,7 +21,7 @@ pub struct Vm<'a> {
 
 impl<'a> Vm<'a> {
     pub fn new(b: &'a Bytecode) -> Self {
-        let main_frame = Frame::new(b.instructions);
+        let main_frame = Frame::new(b.instructions.clone());
         Self {
             frames: vec![main_frame],
             constants: b.constants,
@@ -139,8 +139,26 @@ impl<'a> Vm<'a> {
                         self.set_ip(pos as i32 - 1);
                     }
                 }
-                Call | ReturnValue | Return => {
-                    unimplemented!()
+                Call => {
+                    let obj = self.stack.peek();
+                    let instructions = if let object::Object::CompiledFunction(instructions) = obj {
+                        instructions
+                    } else {
+                        return Err(format!("Expected function in stack: {:?}", obj));
+                    };
+                    let frame = Frame::new(instructions.clone());
+                    self.push_frame(frame);
+                }
+                ReturnValue => {
+                    let val = self.stack.pop();
+                    self.pop_frame();
+                    self.stack.pop(); // OpCall TODO: why not use pop above?
+                    self.stack.push(val);
+                }
+                Return => {
+                    self.pop_frame();
+                    self.stack.pop(); // OpCall TODO: why not use pop above?
+                    self.stack.push(object::NULL);
                 }
             }
         }
@@ -148,7 +166,15 @@ impl<'a> Vm<'a> {
     }
 
     fn current_frame(&self) -> &Frame {
-        self.frames.last().expect("No frames left")
+        self.frames.last().expect("Current: No frames left")
+    }
+
+    fn push_frame(&mut self, f: Frame) {
+        self.frames.push(f)
+    }
+
+    fn pop_frame(&mut self) {
+        self.frames.pop().expect("Pop: No frames left");
     }
 
     fn inc_ip(&mut self, n: i32) {
@@ -357,6 +383,64 @@ mod tests {
         assert_eq!(run_vm_test("if (1 > 2) { 10 } "), null());
         assert_eq!(run_vm_test("!(if(false){5})"), boolean(true));
         assert_eq!(run_vm_test("if ((if(false){10})){10} else {20}"), int(20));
+    }
+
+    #[test]
+    fn test_functions_without_arguments() {
+        assert_eq!(run_vm_test("fn() {}();"), null());
+        assert_eq!(
+            run_vm_test(
+                "
+                    let noReturn = fn() {};
+                    let noReturnTwo = fn() { noReturn(); };
+                    noReturn();
+                    noReturnTwo();
+                "
+            ),
+            null()
+        );
+        assert_eq!(run_vm_test("let a = fn() { 5 + 10; }; a();"), int(15));
+        assert_eq!(run_vm_test("fn() { 5 + 10; }();"), int(15));
+        assert_eq!(
+            run_vm_test(
+                "
+                    let one = fn() { 1 };
+                    let two = fn() { one() + one() };
+                    one() + two()
+                "
+            ),
+            int(3)
+        );
+    }
+
+    #[test]
+    fn test_functions_with_return_statement() {
+        assert_eq!(run_vm_test("fn() { return 99; 100; }()"), int(99));
+        assert_eq!(run_vm_test("fn() { return 99; return 100; }()"), int(99));
+    }
+
+    #[test]
+    #[should_panic]
+    fn unsupported_function_returning_function() {
+        // doesn't work, because an ast::Call refers to a function which can only be a literal or a
+        // function. it cannot be an arbitrary expression. If we make the indirection via a let
+        // binding (see below), it works though.
+        run_vm_test("let a = fn() { 1; }; let b = fn() { a; }; b()();");
+    }
+
+    #[test]
+    fn function_returning_function() {
+        assert_eq!(
+            run_vm_test(
+                "
+                let returnsOne = fn() { 1; };
+                let returnsOneReturner = fn() { returnsOne; };
+                let returnedOne = returnsOneReturner();
+                returnedOne();
+            "
+            ),
+            int(1)
+        );
     }
 
     #[test]
