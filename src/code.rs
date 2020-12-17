@@ -295,6 +295,26 @@ pub fn display_instructions(instructions: Vec<Vec<u8>>) -> String {
     result
 }
 
+pub fn display_flat_instructions(instructions: Vec<u8>) -> String {
+    let mut result = String::new();
+    let mut index = 0;
+    while index < instructions.len() {
+        let def: Definition = Op::try_from(instructions[index])
+            .unwrap_or_else(|_| panic!("Definition for instruction {} not found", instructions[0]))
+            .into();
+
+        let mut length = 0;
+        for width in def.operand_widths {
+            length += width as usize;
+        }
+
+        let instr = &instructions[index..=(index + length)];
+        display_instruction(instr, index, &mut result);
+        index += 1 + length;
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
 

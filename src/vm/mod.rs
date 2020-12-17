@@ -1,75 +1,52 @@
 pub mod frame;
+mod stack;
 
 use crate::code::*;
 use crate::compiler::*;
 use crate::object;
+use frame::*;
+use stack::*;
 
 use std::collections::HashMap;
 use std::convert::TryInto;
 
-const STACK_SIZE: usize = 2048;
+const MAX_FRAMES: usize = 1024;
 
 pub struct Vm<'a> {
-    instructions: &'a Instructions,
+    frames: Vec<Frame<'a>>,
     constants: &'a Vec<object::Object>,
     globals: HashMap<u16, object::Object>,
     stack: Stack,
 }
 
-pub struct Stack {
-    elems: Vec<object::Object>,
-    sp: usize, // points to next free
-}
-
-impl Stack {
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            elems: vec![object::NULL; capacity],
-            sp: 0,
-        }
-    }
-
-    pub fn pop(&mut self) -> object::Object {
-        let object = self.elems[self.sp - 1].clone();
-        self.sp -= 1;
-        object
-    }
-
-    pub fn push(&mut self, obj: object::Object) {
-        self.elems[self.sp] = obj;
-        self.sp += 1;
-    }
-
-    pub fn last_popped_elem(&self) -> &object::Object {
-        &self.elems[self.sp]
-    }
-}
-
 impl<'a> Vm<'a> {
     pub fn new(b: &'a Bytecode) -> Self {
+        let main_frame = Frame::new(b.instructions);
         Self {
-            instructions: b.instructions,
+            frames: vec![main_frame],
             constants: b.constants,
             globals: HashMap::new(),
 
-            stack: Stack::with_capacity(STACK_SIZE),
+            stack: Stack::with_capacity(MAX_FRAMES),
         }
     }
 
     pub fn run(&mut self) -> Result<(), String> {
         use Op::*;
-        let mut i = 0;
 
-        while i < self.instructions.len() {
-            let op: Op = self.instructions[i].try_into()?;
+        while self.current_frame().more_instructions() {
+            self.inc_ip(1);
+
+            let instr = self.current_frame().current_instruction();
+            let op: Op = instr.clone().try_into()?;
 
             match op {
                 Constant => {
-                    let idx = read_bigendian(self.instructions, i + 1);
+                    let idx = self.current_frame().read_bigendian();
                     let value = self.constants[idx as usize].clone();
-                    self.stack.push(value);
+                    self.stack.push(value.clone());
 
-                    i += 2;
+                    self.inc_ip(2);
                 }
                 True => self.stack.push(object::TRUE),
                 False => self.stack.push(object::FALSE),
@@ -80,7 +57,7 @@ impl<'a> Vm<'a> {
                     self.stack.push(object::NULL);
                 }
                 Array => {
-                    let length = read_bigendian(self.instructions, i + 1);
+                    let length = self.current_frame().read_bigendian();
                     let mut array = Vec::with_capacity(length as usize);
                     for _ in 0..length {
                         array.push(self.stack.pop());
@@ -88,10 +65,10 @@ impl<'a> Vm<'a> {
                     array.reverse();
                     self.stack.push(object::Object::Array(array));
 
-                    i += 2;
+                    self.inc_ip(2);
                 }
                 Hash => {
-                    let length = read_bigendian(self.instructions, i + 1);
+                    let length = self.current_frame().read_bigendian();
                     let mut hash = Vec::with_capacity((length / 2) as usize);
                     for _ in 0..length {
                         let value = self.stack.pop();
@@ -101,7 +78,7 @@ impl<'a> Vm<'a> {
                     hash.reverse();
                     self.stack.push(object::Object::Map(hash));
 
-                    i += 2;
+                    self.inc_ip(2);
                 }
                 Index => {
                     let index = self.stack.pop();
@@ -134,41 +111,52 @@ impl<'a> Vm<'a> {
                     self.run_unary_op(op)?;
                 }
                 GetGlobal => {
-                    let idx = read_bigendian(self.instructions, i + 1);
+                    let idx = self.current_frame().read_bigendian();
                     let value = self
                         .globals
                         .get(&idx)
                         .unwrap_or_else(|| panic!("Global {} not found", idx));
                     self.stack.push(value.clone());
-                    i += 2;
+                    self.inc_ip(2);
                 }
                 SetGlobal => {
-                    let idx = read_bigendian(self.instructions, i + 1);
+                    let idx = self.current_frame().read_bigendian();
                     let value = self.stack.pop();
-                    self.globals.insert(idx, value);
-                    i += 2;
+                    self.globals.insert(idx, value.clone());
+                    self.inc_ip(2);
                 }
                 Jump => {
-                    let pos = read_bigendian(self.instructions, i + 1);
-                    i = pos as usize - 1;
+                    let pos = self.current_frame().read_bigendian();
+                    self.set_ip(pos as i32 - 1);
                 }
                 JumpNotTrue => {
                     let jump = !self.stack_pop_bool()?;
 
-                    let pos = read_bigendian(self.instructions, i + 1);
-                    i += 2;
+                    let pos = self.current_frame().read_bigendian();
+                    self.inc_ip(2);
 
                     if jump {
-                        i = pos as usize - 1;
+                        self.set_ip(pos as i32 - 1);
                     }
                 }
                 Call | ReturnValue | Return => {
                     unimplemented!()
                 }
             }
-            i += 1;
         }
         Ok(())
+    }
+
+    fn current_frame(&self) -> &Frame {
+        self.frames.last().expect("No frames left")
+    }
+
+    fn inc_ip(&mut self, n: i32) {
+        self.frames.last_mut().expect("No frames left").inc_ip(n)
+    }
+
+    fn set_ip(&mut self, n: i32) {
+        self.frames.last_mut().expect("No frames left").set_ip(n)
     }
 
     fn run_binary_op(&mut self, op: Op) -> Result<(), String> {
