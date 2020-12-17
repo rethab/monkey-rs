@@ -1,6 +1,6 @@
 use super::ast;
-use super::code::Instructions;
 use super::environment::Environment;
+use super::vm::code::Instructions;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -20,7 +20,10 @@ pub enum Object {
         body: Box<ast::Statement>,
         env: Rc<RefCell<Environment>>,
     },
-    CompiledFunction(Instructions),
+    CompiledFunction {
+        instructions: Instructions,
+        num_locals: u8,
+    },
     Builtin {
         func: fn(Vec<Object>) -> Result<Object, String>,
     },
@@ -55,7 +58,7 @@ impl Object {
             Null => NULL_OBJ.into(),
             Return(_) => RETURN_OBJ.into(),
             Function { .. } => FUNCTION_OBJ.into(),
-            CompiledFunction(_) => COMPILED_FUNCTION_OBJ.into(),
+            CompiledFunction { .. } => COMPILED_FUNCTION_OBJ.into(),
             Builtin { .. } => BUILTIN_OBJ.into(),
         })
     }
@@ -99,7 +102,9 @@ impl Object {
             Return(v) => v.inspect(),
             Null => String::from("null"),
             Builtin { .. } => "builtin".into(),
-            CompiledFunction(_) => "CompiledFunction[..]".into(),
+            CompiledFunction { num_locals, .. } => {
+                format!("CompiledFunction(num_locals={})[..]", num_locals)
+            }
             Function {
                 parameters, body, ..
             } => {

@@ -1,9 +1,12 @@
+pub mod code;
+pub mod compiler;
+mod context;
 pub mod frame;
 mod stack;
 
-use crate::code::*;
-use crate::compiler::*;
 use crate::object;
+use code::*;
+use compiler::*;
 use frame::*;
 use stack::*;
 
@@ -125,6 +128,9 @@ impl<'a> Vm<'a> {
                     self.globals.insert(idx, value.clone());
                     self.inc_ip(2);
                 }
+                GetLocal | SetLocal => {
+                    unimplemented!("{:?}", op);
+                }
                 Jump => {
                     let pos = self.current_frame().read_bigendian();
                     self.set_ip(pos as i32 - 1);
@@ -140,12 +146,16 @@ impl<'a> Vm<'a> {
                     }
                 }
                 Call => {
-                    let obj = self.stack.peek();
-                    let instructions = if let object::Object::CompiledFunction(instructions) = obj {
-                        instructions
-                    } else {
-                        return Err(format!("Expected function in stack: {:?}", obj));
-                    };
+                    let argc = self.current_frame().read_u8();
+                    self.inc_ip(1);
+
+                    let obj = self.stack.peek_offset(argc as usize);
+                    let instructions =
+                        if let object::Object::CompiledFunction { instructions, .. } = obj {
+                            instructions
+                        } else {
+                            return Err(format!("Expected function in stack: {:?}", obj));
+                        };
                     let frame = Frame::new(instructions.clone());
                     self.push_frame(frame);
                 }
@@ -386,6 +396,15 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn unsupported_let_in_if_consequence() {
+        assert_eq!(
+            run_vm_test("if (true) { let a = 1 } else { let a = 2 }"),
+            null()
+        );
+    }
+
+    #[test]
     fn test_functions_without_arguments() {
         assert_eq!(run_vm_test("fn() {}();"), null());
         assert_eq!(
@@ -414,9 +433,59 @@ mod tests {
     }
 
     #[test]
+    fn test_functions_with_arguments() {
+        assert_eq!(
+            run_vm_test("let identity = fn(a) { a }; identity(4)"),
+            int(4)
+        );
+        assert_eq!(
+            run_vm_test("let sum = fn(a, b) { a + b }; sum(1, 2)"),
+            int(3)
+        );
+    }
+
+    #[test]
     fn test_functions_with_return_statement() {
         assert_eq!(run_vm_test("fn() { return 99; 100; }()"), int(99));
         assert_eq!(run_vm_test("fn() { return 99; return 100; }()"), int(99));
+    }
+
+    #[test]
+    fn test_local_bindings() {
+        assert_eq!(run_vm_test("let a = 4; fn() { a }()"), int(4));
+        assert_eq!(run_vm_test("let a = 4; let b = fn() { a }; b()"), int(4));
+        assert_eq!(
+            run_vm_test("let a = 4; fn() { let b = a + 1; b }()"),
+            int(5)
+        );
+        assert_eq!(run_vm_test("let a = fn() { let a = 1; a }; a()"), int(1));
+        assert_eq!(
+            run_vm_test(
+                "
+                let firstFoobar = fn() { let foobar = 50; foobar; };
+                let secondFoobar = fn() { let foobar = 100; foobar; };
+                firstFoobar() + secondFoobar()
+            "
+            ),
+            int(150)
+        );
+        assert_eq!(
+            run_vm_test(
+                "
+                    let globalSeed = 50;
+                    let minusOne = fn() {
+                        let num = 1;
+                        globalSeed - num
+                    };
+                    let minusTwo = fn() {
+                        let num = 2;
+                        globalSeed - num
+                    };
+                    minusOne() + minusTwo()
+                "
+            ),
+            int(97)
+        );
     }
 
     #[test]
@@ -435,6 +504,19 @@ mod tests {
                 "
                 let returnsOne = fn() { 1; };
                 let returnsOneReturner = fn() { returnsOne; };
+                let returnedOne = returnsOneReturner();
+                returnedOne();
+            "
+            ),
+            int(1)
+        );
+        assert_eq!(
+            run_vm_test(
+                "
+                let returnsOneReturner = fn() {
+                    let returnsOne = fn() { 1; };
+                    returnsOne;
+                };
                 let returnedOne = returnsOneReturner();
                 returnedOne();
             "

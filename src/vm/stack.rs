@@ -22,8 +22,8 @@ impl Stack {
         object
     }
 
-    pub fn peek(&mut self) -> &object::Object {
-        &self.elems[self.sp - 1]
+    pub fn peek_offset(&mut self, offset: usize) -> &object::Object {
+        &self.elems[self.sp - 1 - offset]
     }
 
     pub fn push(&mut self, obj: object::Object) {
@@ -42,5 +42,60 @@ impl<'a> fmt::Display for Stack {
             writeln!(f, "{:>0width$}: {}", i, self.elems[i].inspect(), width = 2)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_push_pop() {
+        let mut stack = Stack::with_capacity(10);
+        stack.push(int(1));
+        assert_eq!(int(1), stack.pop());
+
+        stack.push(int(1));
+        stack.push(int(2));
+        stack.push(int(3));
+        assert_eq!(int(3), stack.pop());
+        assert_eq!(int(2), stack.pop());
+        assert_eq!(int(1), stack.pop());
+    }
+
+    #[test]
+    fn test_last_popped() {
+        let mut stack = Stack::with_capacity(10);
+        stack.push(int(1));
+        assert_eq!(int(1), stack.pop());
+        assert_eq!(int(1), *stack.last_popped_elem());
+
+        stack.push(int(1));
+        stack.push(int(2));
+        assert_eq!(int(2), stack.pop());
+        assert_eq!(int(2), *stack.last_popped_elem());
+
+        assert_eq!(int(1), stack.pop());
+        assert_eq!(int(1), *stack.last_popped_elem());
+    }
+
+    #[test]
+    fn test_peek_offset() {
+        let mut stack = Stack::with_capacity(10);
+        stack.push(int(1));
+        stack.push(int(2));
+        stack.push(int(3));
+        assert_eq!(int(3), *stack.peek_offset(0));
+        assert_eq!(int(2), *stack.peek_offset(1));
+        assert_eq!(int(1), *stack.peek_offset(2));
+
+        stack.pop();
+
+        assert_eq!(int(2), *stack.peek_offset(0));
+        assert_eq!(int(1), *stack.peek_offset(1));
+    }
+
+    fn int(x: i64) -> object::Object {
+        object::Object::Integer(x)
     }
 }

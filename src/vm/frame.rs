@@ -1,4 +1,4 @@
-use super::super::code;
+use super::code;
 use std::fmt;
 
 pub struct Frame {
@@ -41,6 +41,10 @@ impl Frame {
     pub fn read_bigendian(&self) -> u16 {
         code::read_bigendian(&self.instructions, (self.ip as usize) + 1)
     }
+
+    pub fn read_u8(&self) -> u8 {
+        self.instructions[self.ip as usize + 1]
+    }
 }
 
 impl<'a> fmt::Display for Frame {
@@ -49,7 +53,7 @@ impl<'a> fmt::Display for Frame {
         writeln!(
             f,
             "instructions=\n{}",
-            code::display_flat_instructions(self.instructions.to_vec())
+            code::display_flat_instructions(self.instructions.to_vec(), Some(self.ip))
         )
     }
 }

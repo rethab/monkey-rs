@@ -1,6 +1,4 @@
 pub mod ast;
-pub mod code;
-pub mod compiler;
 pub mod environment;
 pub mod evaluator;
 pub mod lexer;
