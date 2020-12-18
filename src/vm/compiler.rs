@@ -203,14 +203,7 @@ impl Compiler {
             }
             ast::Expression::FunctionLiteral {
                 body, parameters, ..
-            } => {
-                ctx = ctx.local();
-                for param in parameters {
-                    ctx.define(param);
-                }
-                ctx = self.compile_function_literal(*body, ctx)?;
-                Ok(ctx.unlocal())
-            }
+            } => self.compile_function_literal(*body, parameters, ctx),
             ast::Expression::Call {
                 function,
                 arguments,
@@ -229,14 +222,7 @@ impl Compiler {
                     }
                     ast::Function::Literal {
                         body, parameters, ..
-                    } => {
-                        let mut local_ctx = ctx.local();
-                        for param in parameters {
-                            local_ctx.define(param);
-                        }
-                        local_ctx = self.compile_function_literal(*body, local_ctx)?;
-                        local_ctx.unlocal()
-                    }
+                    } => self.compile_function_literal(*body, parameters, ctx)?,
                 };
                 let argc = arguments.len();
                 for arg in arguments {
@@ -251,9 +237,15 @@ impl Compiler {
     fn compile_function_literal(
         &mut self,
         body: ast::Statement,
+        parameters: Vec<ast::Identifier>,
         mut ctx: Context,
     ) -> Result<Context, String> {
         self.enter_scope();
+        ctx = ctx.local();
+        let num_parameters = parameters.len();
+        for param in parameters {
+            ctx.define(param);
+        }
         ctx = self.compile_statement(body, ctx)?;
         let num_locals = ctx.num_definitions();
         // implicit return
@@ -268,10 +260,11 @@ impl Compiler {
         let function = object::Object::CompiledFunction {
             instructions,
             num_locals,
+            num_parameters: num_parameters as u8,
         };
         let idx = self.add_constant(function);
         self.emit(Op::Constant, &[idx])?;
-        Ok(ctx)
+        Ok(ctx.unlocal())
     }
 
     fn emit(&mut self, op: Op, operands: &[i32]) -> CompileResult<usize> {
@@ -781,6 +774,7 @@ mod tests {
                         make(Op::ReturnValue, &vec![]).unwrap(),
                     ],
                     1,
+                    1,
                 ),
                 int(24),
             ],
@@ -805,6 +799,7 @@ mod tests {
                         make(Op::GetLocal, &vec![2]).unwrap(),
                         make(Op::ReturnValue, &vec![]).unwrap(),
                     ],
+                    3,
                     3,
                 ),
                 int(24),
@@ -854,6 +849,7 @@ mod tests {
                         make(Op::ReturnValue, &vec![]).unwrap(),
                     ],
                     1,
+                    0,
                 ),
             ],
             vec![
@@ -878,6 +874,7 @@ mod tests {
                         make(Op::ReturnValue, &vec![]).unwrap(),
                     ],
                     2,
+                    0,
                 ),
             ],
             vec![
@@ -969,13 +966,19 @@ mod tests {
         object::Object::CompiledFunction {
             instructions: flatten(instructions),
             num_locals: 0,
+            num_parameters: 0,
         }
     }
 
-    fn function_locals(instructions: Vec<Instructions>, num_locals: u8) -> object::Object {
+    fn function_locals(
+        instructions: Vec<Instructions>,
+        num_locals: u8,
+        num_parameters: u8,
+    ) -> object::Object {
         object::Object::CompiledFunction {
             instructions: flatten(instructions),
-            num_locals: num_locals,
+            num_locals,
+            num_parameters,
         }
     }
 

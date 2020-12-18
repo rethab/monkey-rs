@@ -23,6 +23,7 @@ pub enum Object {
     CompiledFunction {
         instructions: Instructions,
         num_locals: u8,
+        num_parameters: u8,
     },
     Builtin {
         func: fn(Vec<Object>) -> Result<Object, String>,
@@ -102,8 +103,12 @@ impl Object {
             Return(v) => v.inspect(),
             Null => String::from("null"),
             Builtin { .. } => "builtin".into(),
-            CompiledFunction { num_locals, .. } => {
-                format!("CompiledFunction(num_locals={})[..]", num_locals)
+            CompiledFunction {
+                num_locals,
+                num_parameters,
+                ..
+            } => {
+                format!("CompiledFunction({}/{})[..]", num_parameters, num_locals)
             }
             Function {
                 parameters, body, ..

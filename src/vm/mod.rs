@@ -161,20 +161,7 @@ impl<'a> Vm<'a> {
                 Call => {
                     let argc = self.current_frame().read_u8();
                     self.inc_ip(1);
-
-                    let obj = self.stack.peek_offset(argc as usize);
-                    let (instructions, num_locals) = if let object::Object::CompiledFunction {
-                        instructions,
-                        num_locals,
-                    } = obj
-                    {
-                        (instructions, *num_locals)
-                    } else {
-                        return Err(format!("Expected function in stack: {:?}", obj));
-                    };
-                    let frame = Frame::new(instructions.clone(), self.stack.sp() as usize);
-                    self.stack.inc_sp(num_locals);
-                    self.push_frame(frame);
+                    self.call_function(argc)?;
                 }
                 ReturnValue => {
                     let val = self.stack.pop();
@@ -189,6 +176,31 @@ impl<'a> Vm<'a> {
                 }
             }
         }
+        Ok(())
+    }
+
+    fn call_function(&mut self, argc: u8) -> Result<(), String> {
+        let base_pointer = self.stack.sp() as usize - argc as usize;
+        let obj = self.stack.peek_offset(argc as usize);
+        let (instructions, num_locals) = if let object::Object::CompiledFunction {
+            instructions,
+            num_locals,
+            num_parameters,
+        } = obj
+        {
+            if *num_parameters != argc {
+                return Err(format!(
+                    "wrong number of arguments: want={}, got={}",
+                    num_parameters, argc
+                ));
+            }
+            (instructions, *num_locals)
+        } else {
+            return Err(format!("Expected function in stack: {:?}", obj));
+        };
+        let frame = Frame::new(instructions.clone(), base_pointer);
+        self.stack.inc_sp(num_locals);
+        self.push_frame(frame);
         Ok(())
     }
 
@@ -459,6 +471,48 @@ mod tests {
             run_vm_test("let sum = fn(a, b) { a + b }; sum(1, 2)"),
             int(3)
         );
+        assert_eq!(
+            run_vm_test("let sum = fn(a, b) { let c = a + b; c }; sum(1, 2)"),
+            int(3)
+        );
+        assert_eq!(run_vm_test("fn(a, b) { let c = a + b; c }(1, 2)"), int(3));
+        assert_eq!(
+            run_vm_test(
+                "
+                    let sum = fn(a, b) { let c = a + b; c };
+                    let outer = fn() { sum(1, 2) + sum(3, 4) };
+                    outer()
+                "
+            ),
+            int(10)
+        );
+        assert_eq!(
+            run_vm_test(
+                "
+                    let globalNum = 10;
+                    let sum = fn(a, b) { let c = a + b; c + globalNum };
+                    let outer = fn() { sum(1, 2) + sum(3, 4) + globalNum };
+                    outer() + globalNum
+                "
+            ),
+            int(50)
+        );
+    }
+
+    #[test]
+    fn test_calling_functions_with_wrong_arguments() {
+        assert_eq!(
+            run_vm_error("fn() { 1; }(1)"),
+            "wrong number of arguments: want=0, got=1"
+        );
+        assert_eq!(
+            run_vm_error("fn(a) { a; }()"),
+            "wrong number of arguments: want=1, got=0"
+        );
+        assert_eq!(
+            run_vm_error("fn(a, b) { a + b; }(1)"),
+            "wrong number of arguments: want=2, got=1"
+        );
     }
 
     #[test]
@@ -556,17 +610,28 @@ mod tests {
         );
     }
 
-    fn run_vm_test(input: &str) -> object::Object {
+    fn compile(input: &str) -> Compiler {
         let p = parse(input);
         let mut c = Compiler::default();
         c.compile(p).expect("Failed to compile");
+        c
+    }
 
+    fn run_vm_test(input: &str) -> object::Object {
+        let c = compile(input);
         let bytecode = &c.bytecode();
         let mut vm = Vm::new(bytecode);
         vm.run().expect("Failed to run");
 
         let result = vm.last_popped_stack_elem();
         result.clone()
+    }
+
+    fn run_vm_error(input: &str) -> String {
+        let c = compile(input);
+        let bytecode = &c.bytecode();
+        let mut vm = Vm::new(bytecode);
+        vm.run().expect_err("Failed to fail ;-)")
     }
 
     fn parse(input: &str) -> ast::Program {
