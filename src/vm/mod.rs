@@ -24,7 +24,7 @@ pub struct Vm<'a> {
 
 impl<'a> Vm<'a> {
     pub fn new(b: &'a Bytecode) -> Self {
-        let main_frame = Frame::new(b.instructions.clone());
+        let main_frame = Frame::new(b.instructions.clone(), 0);
         Self {
             frames: vec![main_frame],
             constants: b.constants,
@@ -128,8 +128,21 @@ impl<'a> Vm<'a> {
                     self.globals.insert(idx, value.clone());
                     self.inc_ip(2);
                 }
-                GetLocal | SetLocal => {
-                    unimplemented!("{:?}", op);
+                SetLocal => {
+                    let local_idx = self.current_frame().read_u8() as usize;
+                    self.inc_ip(1);
+
+                    let stack_idx = self.current_frame().base_pointer as usize + local_idx;
+                    let obj = self.stack.pop();
+                    self.stack.push_at(stack_idx, obj);
+                }
+                GetLocal => {
+                    let local_idx = self.current_frame().read_u8() as usize;
+                    self.inc_ip(1);
+
+                    let stack_idx = self.current_frame().base_pointer as usize + local_idx;
+                    let obj = self.stack.peek_at(stack_idx).clone();
+                    self.stack.push(obj);
                 }
                 Jump => {
                     let pos = self.current_frame().read_bigendian();
@@ -150,24 +163,28 @@ impl<'a> Vm<'a> {
                     self.inc_ip(1);
 
                     let obj = self.stack.peek_offset(argc as usize);
-                    let instructions =
-                        if let object::Object::CompiledFunction { instructions, .. } = obj {
-                            instructions
-                        } else {
-                            return Err(format!("Expected function in stack: {:?}", obj));
-                        };
-                    let frame = Frame::new(instructions.clone());
+                    let (instructions, num_locals) = if let object::Object::CompiledFunction {
+                        instructions,
+                        num_locals,
+                    } = obj
+                    {
+                        (instructions, num_locals.clone())
+                    } else {
+                        return Err(format!("Expected function in stack: {:?}", obj));
+                    };
+                    let frame = Frame::new(instructions.clone(), self.stack.sp() as usize);
+                    self.stack.inc_sp(num_locals);
                     self.push_frame(frame);
                 }
                 ReturnValue => {
                     let val = self.stack.pop();
-                    self.pop_frame();
-                    self.stack.pop(); // OpCall TODO: why not use pop above?
+                    let frame = self.pop_frame();
+                    self.stack.set_sp(frame.base_pointer - 1);
                     self.stack.push(val);
                 }
                 Return => {
-                    self.pop_frame();
-                    self.stack.pop(); // OpCall TODO: why not use pop above?
+                    let frame = self.pop_frame();
+                    self.stack.set_sp(frame.base_pointer - 1);
                     self.stack.push(object::NULL);
                 }
             }
@@ -183,8 +200,8 @@ impl<'a> Vm<'a> {
         self.frames.push(f)
     }
 
-    fn pop_frame(&mut self) {
-        self.frames.pop().expect("Pop: No frames left");
+    fn pop_frame(&mut self) -> Frame {
+        self.frames.pop().expect("Pop: No frames left")
     }
 
     fn inc_ip(&mut self, n: i32) {

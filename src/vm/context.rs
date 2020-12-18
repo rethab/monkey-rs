@@ -1,5 +1,6 @@
 use crate::ast;
 use std::collections::HashMap;
+use std::convert::TryInto;
 
 #[derive(Clone, Debug)]
 pub struct Context {
@@ -58,6 +59,10 @@ impl Context {
             .or_else(|| self.parent.as_ref().and_then(|p| p.resolve(ident)))
     }
 
+    pub fn num_definitions(&self) -> u8 {
+        self.symbols.len().try_into().unwrap()
+    }
+
     pub fn local(self) -> Self {
         Self {
             parent: Some(Box::new(self)),
@@ -112,6 +117,7 @@ mod test {
         let mut g = Context::default();
         g.define(ident("a"));
         assert_eq!(g.resolve(&ident("a")), global(0));
+        assert_eq!(g.num_definitions(), 1);
 
         // local
         let mut l = g.local();
@@ -120,6 +126,7 @@ mod test {
         assert_eq!(l.resolve(&ident("a")), global(0));
         assert_eq!(l.resolve(&ident("b")), local(0));
         assert_eq!(l.resolve(&ident("c")), local(1));
+        assert_eq!(l.num_definitions(), 2);
 
         // nested local
         let mut nl = l.local();
@@ -128,10 +135,12 @@ mod test {
         assert_eq!(nl.resolve(&ident("a")), global(0));
         assert_eq!(nl.resolve(&ident("e")), local(0));
         assert_eq!(nl.resolve(&ident("f")), local(1));
+        assert_eq!(nl.num_definitions(), 2);
 
         // unlocal
         let g = nl.unlocal().unlocal();
         assert_eq!(g.resolve(&ident("a")), global(0));
+        assert_eq!(g.num_definitions(), 1);
     }
 
     fn global(x: u16) -> Option<ScopedValue> {

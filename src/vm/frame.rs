@@ -4,13 +4,15 @@ use std::fmt;
 pub struct Frame {
     pub instructions: code::Instructions,
     pub ip: i32,
+    pub base_pointer: usize, // value of ip before calling function
 }
 
 impl Frame {
-    pub fn new(instructions: code::Instructions) -> Self {
+    pub fn new(instructions: code::Instructions, base_pointer: usize) -> Self {
         Self {
             instructions,
             ip: -1,
+            base_pointer,
         }
     }
 
@@ -49,7 +51,7 @@ impl Frame {
 
 impl<'a> fmt::Display for Frame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        writeln!(f, "ip={}", self.ip)?;
+        writeln!(f, "ip={}, base_pointer={}", self.ip, self.base_pointer)?;
         writeln!(
             f,
             "instructions=\n{}",

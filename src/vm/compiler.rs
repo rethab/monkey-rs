@@ -246,6 +246,7 @@ impl Compiler {
     ) -> Result<Context, String> {
         self.enter_scope();
         ctx = self.compile_statement(body, ctx.local())?;
+        let num_locals = ctx.num_definitions();
         ctx = ctx.unlocal();
         // implicit return
         if self.last_instruction_is(Op::Pop) {
@@ -256,7 +257,6 @@ impl Compiler {
             self.emit(Op::Return, &[])?;
         }
         let instructions = self.leave_scope().instructions;
-        let num_locals = 117; // FIXME: dummy
         let function = object::Object::CompiledFunction {
             instructions,
             num_locals,
@@ -832,12 +832,15 @@ mod tests {
             "fn() { let num = 55; num }",
             vec![
                 int(55),
-                function(vec![
-                    make(Op::Constant, &vec![0]).unwrap(),
-                    make(Op::SetLocal, &vec![0]).unwrap(),
-                    make(Op::GetLocal, &vec![0]).unwrap(),
-                    make(Op::ReturnValue, &vec![]).unwrap(),
-                ]),
+                function_locals(
+                    vec![
+                        make(Op::Constant, &vec![0]).unwrap(),
+                        make(Op::SetLocal, &vec![0]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                ),
             ],
             vec![
                 make(Op::Constant, &vec![1]).unwrap(),
@@ -849,16 +852,19 @@ mod tests {
             vec![
                 int(55),
                 int(77),
-                function(vec![
-                    make(Op::Constant, &vec![0]).unwrap(),
-                    make(Op::SetLocal, &vec![0]).unwrap(),
-                    make(Op::Constant, &vec![1]).unwrap(),
-                    make(Op::SetLocal, &vec![1]).unwrap(),
-                    make(Op::GetLocal, &vec![0]).unwrap(),
-                    make(Op::GetLocal, &vec![1]).unwrap(),
-                    make(Op::Add, &vec![]).unwrap(),
-                    make(Op::ReturnValue, &vec![]).unwrap(),
-                ]),
+                function_locals(
+                    vec![
+                        make(Op::Constant, &vec![0]).unwrap(),
+                        make(Op::SetLocal, &vec![0]).unwrap(),
+                        make(Op::Constant, &vec![1]).unwrap(),
+                        make(Op::SetLocal, &vec![1]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::GetLocal, &vec![1]).unwrap(),
+                        make(Op::Add, &vec![]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    2,
+                ),
             ],
             vec![
                 make(Op::Constant, &vec![2]).unwrap(),
@@ -948,7 +954,14 @@ mod tests {
     fn function(instructions: Vec<Instructions>) -> object::Object {
         object::Object::CompiledFunction {
             instructions: flatten(instructions),
-            num_locals: 117,
+            num_locals: 0,
+        }
+    }
+
+    fn function_locals(instructions: Vec<Instructions>, num_locals: u8) -> object::Object {
+        object::Object::CompiledFunction {
+            instructions: flatten(instructions),
+            num_locals: num_locals,
         }
     }
 

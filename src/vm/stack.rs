@@ -26,9 +26,29 @@ impl Stack {
         &self.elems[self.sp - 1 - offset]
     }
 
+    pub fn peek_at(&mut self, idx: usize) -> &object::Object {
+        &self.elems[idx]
+    }
+
     pub fn push(&mut self, obj: object::Object) {
         self.elems[self.sp] = obj;
         self.sp += 1;
+    }
+
+    pub fn push_at(&mut self, idx: usize, obj: object::Object) {
+        self.elems[idx] = obj;
+    }
+
+    pub fn sp(&self) -> usize {
+        self.sp
+    }
+
+    pub fn inc_sp(&mut self, n: u8) {
+        self.sp += n as usize;
+    }
+
+    pub fn set_sp(&mut self, sp: usize) {
+        self.sp = sp;
     }
 
     pub fn last_popped_elem(&self) -> &object::Object {
@@ -93,6 +113,29 @@ mod tests {
 
         assert_eq!(int(2), *stack.peek_offset(0));
         assert_eq!(int(1), *stack.peek_offset(1));
+    }
+
+    #[test]
+    fn test_push_at_doesnt_modify_sp() {
+        let mut stack = Stack::with_capacity(10);
+        stack.push(int(1));
+
+        // create two hole and fill them
+        stack.inc_sp(2);
+        stack.push_at(1, int(2));
+        stack.push_at(2, int(3));
+
+        stack.push(int(4));
+
+        assert_eq!(*stack.peek_at(0), int(1));
+        assert_eq!(*stack.peek_at(1), int(2));
+        assert_eq!(*stack.peek_at(2), int(3));
+        assert_eq!(*stack.peek_at(3), int(4));
+
+        assert_eq!(stack.pop(), int(4));
+        assert_eq!(stack.pop(), int(3));
+        assert_eq!(stack.pop(), int(2));
+        assert_eq!(stack.pop(), int(1));
     }
 
     fn int(x: i64) -> object::Object {
