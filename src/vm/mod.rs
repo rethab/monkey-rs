@@ -168,7 +168,7 @@ impl<'a> Vm<'a> {
                         num_locals,
                     } = obj
                     {
-                        (instructions, num_locals.clone())
+                        (instructions, *num_locals)
                     } else {
                         return Err(format!("Expected function in stack: {:?}", obj));
                     };

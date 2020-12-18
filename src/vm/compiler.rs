@@ -204,10 +204,12 @@ impl Compiler {
             ast::Expression::FunctionLiteral {
                 body, parameters, ..
             } => {
+                ctx = ctx.local();
                 for param in parameters {
                     ctx.define(param);
                 }
-                self.compile_function_literal(*body, ctx)
+                ctx = self.compile_function_literal(*body, ctx)?;
+                Ok(ctx.unlocal())
             }
             ast::Expression::Call {
                 function,
@@ -225,8 +227,15 @@ impl Compiler {
                         }?;
                         ctx
                     }
-                    ast::Function::Literal { body, .. } => {
-                        self.compile_function_literal(*body, ctx)?
+                    ast::Function::Literal {
+                        body, parameters, ..
+                    } => {
+                        let mut local_ctx = ctx.local();
+                        for param in parameters {
+                            local_ctx.define(param);
+                        }
+                        local_ctx = self.compile_function_literal(*body, local_ctx)?;
+                        local_ctx.unlocal()
                     }
                 };
                 let argc = arguments.len();
@@ -245,9 +254,8 @@ impl Compiler {
         mut ctx: Context,
     ) -> Result<Context, String> {
         self.enter_scope();
-        ctx = self.compile_statement(body, ctx.local())?;
+        ctx = self.compile_statement(body, ctx)?;
         let num_locals = ctx.num_definitions();
-        ctx = ctx.unlocal();
         // implicit return
         if self.last_instruction_is(Op::Pop) {
             self.remove_last_pop();
@@ -767,16 +775,19 @@ mod tests {
         run_copmiler_test(
             "let oneArg = fn(a) { a }; oneArg(24)",
             vec![
-                function(vec![
-                    make(Op::GetGlobal, &vec![0]).unwrap(),
-                    make(Op::ReturnValue, &vec![]).unwrap(),
-                ]),
+                function_locals(
+                    vec![
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                ),
                 int(24),
             ],
             vec![
                 make(Op::Constant, &vec![0]).unwrap(),
-                make(Op::SetGlobal, &vec![1]).unwrap(),
-                make(Op::GetGlobal, &vec![1]).unwrap(),
+                make(Op::SetGlobal, &vec![0]).unwrap(),
+                make(Op::GetGlobal, &vec![0]).unwrap(),
                 make(Op::Constant, &vec![1]).unwrap(),
                 make(Op::Call, &vec![1]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
@@ -785,22 +796,25 @@ mod tests {
         run_copmiler_test(
             "let manyArg = fn(a, b, c) { a; b; c }; manyArg(24, 25, 26)",
             vec![
-                function(vec![
-                    make(Op::GetGlobal, &vec![0]).unwrap(),
-                    make(Op::Pop, &vec![]).unwrap(),
-                    make(Op::GetGlobal, &vec![1]).unwrap(),
-                    make(Op::Pop, &vec![]).unwrap(),
-                    make(Op::GetGlobal, &vec![2]).unwrap(),
-                    make(Op::ReturnValue, &vec![]).unwrap(),
-                ]),
+                function_locals(
+                    vec![
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Pop, &vec![]).unwrap(),
+                        make(Op::GetLocal, &vec![1]).unwrap(),
+                        make(Op::Pop, &vec![]).unwrap(),
+                        make(Op::GetLocal, &vec![2]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    3,
+                ),
                 int(24),
                 int(25),
                 int(26),
             ],
             vec![
                 make(Op::Constant, &vec![0]).unwrap(),
-                make(Op::SetGlobal, &vec![3]).unwrap(),
-                make(Op::GetGlobal, &vec![3]).unwrap(),
+                make(Op::SetGlobal, &vec![0]).unwrap(),
+                make(Op::GetGlobal, &vec![0]).unwrap(),
                 make(Op::Constant, &vec![1]).unwrap(),
                 make(Op::Constant, &vec![2]).unwrap(),
                 make(Op::Constant, &vec![3]).unwrap(),
