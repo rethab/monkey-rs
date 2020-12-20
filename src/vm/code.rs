@@ -31,6 +31,9 @@ pub enum Op {
     GetLocal,
     SetLocal,
 
+    // builtins
+    GetBuiltin,
+
     // prefix
     Minus,
     Bang,
@@ -80,6 +83,7 @@ impl TryFrom<u8> for Op {
             x if x == Op::SetGlobal as u8 => Ok(Op::SetGlobal),
             x if x == Op::GetLocal as u8 => Ok(Op::GetLocal),
             x if x == Op::SetLocal as u8 => Ok(Op::SetLocal),
+            x if x == Op::GetBuiltin as u8 => Ok(Op::GetBuiltin),
             x if x == Op::Minus as u8 => Ok(Op::Minus),
             x if x == Op::Index as u8 => Ok(Op::Index),
             x if x == Op::Bang as u8 => Ok(Op::Bang),
@@ -194,6 +198,10 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpSetLocal",
                 operand_widths: vec![1],
             },
+            GetBuiltin => Definition {
+                name: "OpGetBuiltin",
+                operand_widths: vec![1],
+            },
             Minus => Definition {
                 name: "OpMinus",
                 operand_widths: vec![],
@@ -279,6 +287,7 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String, curren
         Op::SetGlobal => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::GetLocal => buf.push_str(&format!(" {}", instr[1])),
         Op::SetLocal => buf.push_str(&format!(" {}", instr[1])),
+        Op::GetBuiltin => buf.push_str(&format!(" {}", instr[1])),
         Op::Array => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::Hash => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::Call => buf.push_str(&format!(" {}", instr[1])),
@@ -375,6 +384,7 @@ mod tests {
             ),
             (Op::GetLocal, vec![122], vec![Op::GetLocal.byte(), 122]),
             (Op::SetLocal, vec![3], vec![Op::SetLocal.byte(), 3]),
+            (Op::GetBuiltin, vec![3], vec![Op::GetBuiltin.byte(), 3]),
             (Op::Minus, vec![], vec![Op::Minus.byte()]),
             (Op::Index, vec![], vec![Op::Index.byte()]),
             (Op::Bang, vec![], vec![Op::Bang.byte()]),
@@ -429,6 +439,7 @@ mod tests {
             make(Op::SetGlobal, &vec![8791]).unwrap(),
             make(Op::GetLocal, &vec![123]).unwrap(),
             make(Op::SetLocal, &vec![12]).unwrap(),
+            make(Op::GetBuiltin, &vec![121]).unwrap(),
             make(Op::Minus, &vec![]).unwrap(),
             make(Op::Index, &vec![]).unwrap(),
             make(Op::Bang, &vec![]).unwrap(),
@@ -461,16 +472,17 @@ mod tests {
             0024 OpSetGlobal 8791
             0027 OpGetLocal 123
             0029 OpSetLocal 12
-            0031 OpMinus
-            0032 OpIndex
-            0033 OpBang
-            0034 OpJumpNotTrue 36435
-            0037 OpJump 678
-            0040 OpCall 124
-            0042 OpReturnValue
-            0043 OpReturn
-            0044 OpArray 8987
-            0047 OpHash 8988
+            0031 OpGetBuiltin 121
+            0033 OpMinus
+            0034 OpIndex
+            0035 OpBang
+            0036 OpJumpNotTrue 36435
+            0039 OpJump 678
+            0042 OpCall 124
+            0044 OpReturnValue
+            0045 OpReturn
+            0046 OpArray 8987
+            0049 OpHash 8988
         "
         .trim()
         .replace("            ", "");

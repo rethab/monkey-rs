@@ -144,6 +144,16 @@ impl<'a> Vm<'a> {
                     let obj = self.stack.peek_at(stack_idx).clone();
                     self.stack.push(obj);
                 }
+                GetBuiltin => {
+                    let idx = self.current_frame().read_u8();
+                    self.inc_ip(1);
+
+                    if let Some(obj) = object::lookup_builtin_by_idx(idx) {
+                        self.stack.push(obj);
+                    } else {
+                        panic!("{} is not a builtin", idx);
+                    }
+                }
                 Jump => {
                     let pos = self.current_frame().read_bigendian();
                     self.set_ip(pos as i32 - 1);
@@ -180,28 +190,39 @@ impl<'a> Vm<'a> {
     }
 
     fn call_function(&mut self, argc: u8) -> Result<(), String> {
+        use object::Object::*;
         let base_pointer = self.stack.sp() as usize - argc as usize;
         let obj = self.stack.peek_offset(argc as usize);
-        let (instructions, num_locals) = if let object::Object::CompiledFunction {
-            instructions,
-            num_locals,
-            num_parameters,
-        } = obj
-        {
-            if *num_parameters != argc {
-                return Err(format!(
-                    "wrong number of arguments: want={}, got={}",
-                    num_parameters, argc
-                ));
+        match obj.clone() {
+            CompiledFunction {
+                instructions,
+                num_locals,
+                num_parameters,
+            } => {
+                if num_parameters != argc {
+                    return Err(format!(
+                        "wrong number of arguments: want={}, got={}",
+                        num_parameters, argc
+                    ));
+                }
+
+                let frame = Frame::new(instructions, base_pointer);
+                self.stack.inc_sp(num_locals);
+                self.push_frame(frame);
+                Ok(())
             }
-            (instructions, *num_locals)
-        } else {
-            return Err(format!("Expected function in stack: {:?}", obj));
-        };
-        let frame = Frame::new(instructions.clone(), base_pointer);
-        self.stack.inc_sp(num_locals);
-        self.push_frame(frame);
-        Ok(())
+            Builtin { func } => {
+                let mut arguments = Vec::new();
+                for _ in 0..argc {
+                    arguments.push(self.stack.pop());
+                }
+                arguments.reverse();
+                let result = func(arguments)?;
+                self.stack.push(result);
+                Ok(())
+            }
+            other => Err(format!("Expected function in stack: {:?}", other)),
+        }
     }
 
     fn current_frame(&self) -> &Frame {
@@ -607,6 +628,56 @@ mod tests {
         assert_eq!(
             run_vm_test("let one = 1 let two = 2; if (two > one) { two } else { one }"),
             int(2)
+        );
+    }
+
+    #[test]
+    fn test_builtins() {
+        assert_eq!(run_vm_test("len(\"\")"), int(0));
+        assert_eq!(run_vm_test("len(\"four\")"), int(4));
+        assert_eq!(run_vm_test("len(\"hello world\")"), int(11));
+        assert_eq!(
+            run_vm_error("len(1)"),
+            "argument to 'len' not supported, got INTEGER".to_owned()
+        );
+        assert_eq!(
+            run_vm_error("len(\"one\", \"two\")"),
+            "wrong number of arguments. got=2, want=1".to_owned()
+        );
+        assert_eq!(run_vm_test("len([1, 2, 3])"), int(3));
+        assert_eq!(run_vm_test("len([])"), int(0));
+        assert_eq!(run_vm_test("puts(\"hello, world\")"), null());
+        assert_eq!(run_vm_test("head([1, 2, 3])"), int(1));
+        assert_eq!(
+            run_vm_error("head([])"),
+            "Called 'head' on empty array".to_owned()
+        );
+        assert_eq!(
+            run_vm_error("head(1)"),
+            "argument to 'head' not supported, got INTEGER".to_owned()
+        );
+        assert_eq!(run_vm_test("last([1, 2, 3])"), int(3));
+        assert_eq!(
+            run_vm_error("last([])"),
+            "Called 'last' on empty array".to_owned()
+        );
+        assert_eq!(
+            run_vm_error("last(1)"),
+            "argument to 'last' not supported, got INTEGER".to_owned()
+        );
+        assert_eq!(run_vm_test("tail([1, 2, 3])"), array(vec![int(2), int(3)]));
+        assert_eq!(
+            run_vm_error("tail([])"),
+            "Called 'tail' on empty array".to_owned()
+        );
+        assert_eq!(
+            run_vm_error("tail(1)"),
+            "argument to 'tail' not supported, got INTEGER".to_owned()
+        );
+        assert_eq!(run_vm_test("append([], 1)"), array(vec![int(1)]));
+        assert_eq!(
+            run_vm_error("append(1, 1)"),
+            "first argument to 'append' must be array, but got INTEGER".to_owned()
         );
     }
 

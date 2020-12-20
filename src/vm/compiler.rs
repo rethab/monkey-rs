@@ -62,6 +62,7 @@ impl Compiler {
                 match ctx.define(name) {
                     ScopedValue::Global(idx) => self.emit(Op::SetGlobal, &[idx as i32]),
                     ScopedValue::Local(idx) => self.emit(Op::SetLocal, &[idx as i32]),
+                    ScopedValue::Builtin(_) => panic!("Define can never return a builtin"),
                 }?;
                 Ok(ctx)
             }
@@ -197,6 +198,7 @@ impl Compiler {
                 match value {
                     ScopedValue::Global(idx) => self.emit(Op::GetGlobal, &[idx as i32]),
                     ScopedValue::Local(idx) => self.emit(Op::GetLocal, &[idx as i32]),
+                    ScopedValue::Builtin(idx) => self.emit(Op::GetBuiltin, &[idx as i32]),
                 }?;
 
                 Ok(ctx)
@@ -217,6 +219,7 @@ impl Compiler {
                         match value {
                             ScopedValue::Global(idx) => self.emit(Op::GetGlobal, &[idx as i32]),
                             ScopedValue::Local(idx) => self.emit(Op::GetLocal, &[idx as i32]),
+                            ScopedValue::Builtin(idx) => self.emit(Op::GetBuiltin, &[idx as i32]),
                         }?;
                         ctx
                     }
@@ -362,10 +365,15 @@ impl Compiler {
 
 impl Default for Compiler {
     fn default() -> Self {
+        let mut ctx = Context::default();
+        for (idx, name) in object::builtins() {
+            ctx.define_builtin(idx, name.to_owned());
+        }
+
         Self {
             scopes: vec![CompilationScope::default()],
             constants: vec![],
-            context: Context::default(),
+            context: ctx,
         }
     }
 }
@@ -879,6 +887,42 @@ mod tests {
             ],
             vec![
                 make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_builtins() -> Result<(), String> {
+        run_copmiler_test(
+            "len([]); append([], 1);",
+            vec![int(1)],
+            vec![
+                make(Op::GetBuiltin, &vec![0]).unwrap(),
+                make(Op::Array, &vec![0]).unwrap(),
+                make(Op::Call, &vec![1]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+                make(Op::GetBuiltin, &vec![5]).unwrap(),
+                make(Op::Array, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Call, &vec![2]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "fn() { len([]) }",
+            vec![function_locals(
+                vec![
+                    make(Op::GetBuiltin, &vec![0]).unwrap(),
+                    make(Op::Array, &vec![0]).unwrap(),
+                    make(Op::Call, &vec![1]).unwrap(),
+                    make(Op::ReturnValue, &vec![]).unwrap(),
+                ],
+                0,
+                0,
+            )],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )

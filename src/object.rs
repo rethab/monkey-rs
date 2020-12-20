@@ -146,8 +146,29 @@ impl fmt::Display for ObjectType {
     }
 }
 
+pub fn builtins() -> Vec<(u8, &'static str)> {
+    vec![
+        (0, "len"),
+        (1, "puts"),
+        (2, "head"),
+        (3, "last"),
+        (4, "tail"),
+        (5, "append"),
+        (6, "prepend"),
+    ]
+}
+
+pub fn lookup_builtin_by_idx(idx: u8) -> Option<Object> {
+    let (_, name) = builtins().into_iter().find(|(i, _)| *i == idx)?;
+    lookup_builtin_by_name(name)
+}
+
 pub fn lookup_builtin(ident: &ast::Identifier) -> Option<Object> {
-    match ident.value.as_ref() {
+    lookup_builtin_by_name(&ident.value)
+}
+
+fn lookup_builtin_by_name(name: &str) -> Option<Object> {
+    match name {
         "puts" => Some(Object::Builtin { func: builtin_puts }),
         "len" => Some(Object::Builtin { func: builtin_len }),
         "head" => Some(Object::Builtin { func: builtin_head }),
