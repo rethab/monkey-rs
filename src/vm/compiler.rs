@@ -267,7 +267,7 @@ impl Compiler {
             num_parameters: num_parameters as u8,
         });
         let idx = self.add_constant(function);
-        self.emit(Op::Constant, &[idx])?;
+        self.emit(Op::Closure, &[idx, 0])?;
         Ok(ctx.unlocal())
     }
 
@@ -692,7 +692,7 @@ mod tests {
                 ]),
             ],
             vec![
-                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Closure, &vec![2, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )?;
@@ -709,7 +709,7 @@ mod tests {
                 ]),
             ],
             vec![
-                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Closure, &vec![2, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )?;
@@ -726,7 +726,7 @@ mod tests {
                 ]),
             ],
             vec![
-                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Closure, &vec![2, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )?;
@@ -734,7 +734,7 @@ mod tests {
             "fn() { }",
             vec![function(vec![make(Op::Return, &vec![]).unwrap()])],
             vec![
-                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Closure, &vec![0, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
@@ -752,7 +752,7 @@ mod tests {
                 ]),
             ],
             vec![
-                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Closure, &vec![1, 0]).unwrap(),
                 make(Op::SetGlobal, &vec![0]).unwrap(),
                 make(Op::GetGlobal, &vec![0]).unwrap(),
                 make(Op::Call, &vec![0]).unwrap(),
@@ -769,7 +769,7 @@ mod tests {
                 ]),
             ],
             vec![
-                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Closure, &vec![1, 0]).unwrap(),
                 make(Op::Call, &vec![0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
@@ -788,7 +788,7 @@ mod tests {
                 int(24),
             ],
             vec![
-                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Closure, &vec![0, 0]).unwrap(),
                 make(Op::SetGlobal, &vec![0]).unwrap(),
                 make(Op::GetGlobal, &vec![0]).unwrap(),
                 make(Op::Constant, &vec![1]).unwrap(),
@@ -816,7 +816,7 @@ mod tests {
                 int(26),
             ],
             vec![
-                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Closure, &vec![0, 0]).unwrap(),
                 make(Op::SetGlobal, &vec![0]).unwrap(),
                 make(Op::GetGlobal, &vec![0]).unwrap(),
                 make(Op::Constant, &vec![1]).unwrap(),
@@ -842,7 +842,7 @@ mod tests {
             vec![
                 make(Op::Constant, &vec![0]).unwrap(),
                 make(Op::SetGlobal, &vec![0]).unwrap(),
-                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Closure, &vec![1, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )?;
@@ -862,7 +862,7 @@ mod tests {
                 ),
             ],
             vec![
-                make(Op::Constant, &vec![1]).unwrap(),
+                make(Op::Closure, &vec![1, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )?;
@@ -887,7 +887,7 @@ mod tests {
                 ),
             ],
             vec![
-                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Closure, &vec![2, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
@@ -923,7 +923,7 @@ mod tests {
                 0,
             )],
             vec![
-                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::Closure, &vec![0, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )

@@ -1,16 +1,17 @@
 use super::code;
+use super::object::Closure;
 use std::fmt;
 
 pub struct Frame {
-    pub instructions: code::Instructions,
+    pub cl: Closure,
     pub ip: i32,
     pub base_pointer: usize, // value of ip before calling function
 }
 
 impl Frame {
-    pub fn new(instructions: code::Instructions, base_pointer: usize) -> Self {
+    pub fn new(cl: Closure, base_pointer: usize) -> Self {
         Self {
-            instructions,
+            cl,
             ip: -1,
             base_pointer,
         }
@@ -33,19 +34,19 @@ impl Frame {
     }
 
     pub fn more_instructions(&self) -> bool {
-        self.ip < (self.instructions.len() - 1) as i32
+        self.ip < (self.cl.func.instructions.len() - 1) as i32
     }
 
     pub fn current_instruction(&self) -> u8 {
-        self.instructions[self.ip as usize]
+        self.cl.func.instructions[self.ip as usize]
     }
 
     pub fn read_bigendian(&self) -> u16 {
-        code::read_bigendian(&self.instructions, (self.ip as usize) + 1)
+        code::read_bigendian(&self.cl.func.instructions, (self.ip as usize) + 1)
     }
 
     pub fn read_u8(&self) -> u8 {
-        self.instructions[self.ip as usize + 1]
+        self.cl.func.instructions[self.ip as usize + 1]
     }
 }
 
@@ -55,7 +56,7 @@ impl<'a> fmt::Display for Frame {
         writeln!(
             f,
             "instructions=\n{}",
-            code::display_flat_instructions(self.instructions.to_vec(), Some(self.ip))
+            code::display_flat_instructions(self.cl.func.instructions.to_vec(), Some(self.ip))
         )
     }
 }

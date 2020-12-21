@@ -25,7 +25,16 @@ pub struct Vm<'a> {
 
 impl<'a> Vm<'a> {
     pub fn new(b: &'a Bytecode) -> Self {
-        let main_frame = Frame::new(b.instructions.clone(), 0);
+        let main_func = object::CompiledFunction {
+            instructions: b.instructions.clone(),
+            num_locals: 0,
+            num_parameters: 0,
+        };
+        let main_cl = object::Closure {
+            func: main_func,
+            free: vec![],
+        };
+        let main_frame = Frame::new(main_cl, 0);
         Self {
             frames: vec![main_frame],
             constants: b.constants,
@@ -186,11 +195,34 @@ impl<'a> Vm<'a> {
                     self.stack.push(object::NULL);
                 }
                 Closure => {
-                    unimplemented!()
+                    let func_idx = self.current_frame().read_bigendian();
+                    self.inc_ip(2);
+
+                    let n_free = self.current_frame().read_u8();
+                    self.inc_ip(1);
+
+                    self.push_closure(func_idx, n_free)?;
                 }
             }
         }
         Ok(())
+    }
+
+    fn push_closure(&mut self, func_idx: u16, n_free: u8) -> Result<(), String> {
+        if n_free != 0 {
+            panic!("Free variables are not handled yet");
+        }
+
+        if let object::Object::CompiledFunction(func) = self.constants[func_idx as usize].clone() {
+            let cl = object::Closure { func, free: vec![] };
+            self.stack.push(object::Object::Closure(cl));
+            Ok(())
+        } else {
+            Err(format!(
+                "Object at stack position {} is not a function",
+                func_idx
+            ))
+        }
     }
 
     fn call_function(&mut self, argc: u8) -> Result<(), String> {
@@ -198,23 +230,7 @@ impl<'a> Vm<'a> {
         let base_pointer = self.stack.sp() as usize - argc as usize;
         let obj = self.stack.peek_offset(argc as usize);
         match obj.clone() {
-            CompiledFunction(object::CompiledFunction {
-                instructions,
-                num_locals,
-                num_parameters,
-            }) => {
-                if num_parameters != argc {
-                    return Err(format!(
-                        "wrong number of arguments: want={}, got={}",
-                        num_parameters, argc
-                    ));
-                }
-
-                let frame = Frame::new(instructions, base_pointer);
-                self.stack.inc_sp(num_locals);
-                self.push_frame(frame);
-                Ok(())
-            }
+            Closure(closure) => self.call_closure(argc, base_pointer, closure),
             Builtin { func } => {
                 let mut arguments = Vec::new();
                 for _ in 0..argc {
@@ -225,8 +241,29 @@ impl<'a> Vm<'a> {
                 self.stack.push(result);
                 Ok(())
             }
-            other => Err(format!("Expected function in stack: {:?}", other)),
+            other => Err(format!("calling non-closure and non-builtin: {:?}", other)),
         }
+    }
+
+    fn call_closure(
+        &mut self,
+        argc: u8,
+        base_pointer: usize,
+        cl: object::Closure,
+    ) -> Result<(), String> {
+        if cl.func.num_parameters != argc {
+            return Err(format!(
+                "wrong number of arguments: want={}, got={}",
+                cl.func.num_parameters, argc
+            ));
+        }
+
+        let num_locals = cl.func.num_locals;
+
+        let frame = Frame::new(cl, base_pointer);
+        self.stack.inc_sp(num_locals);
+        self.push_frame(frame);
+        Ok(())
     }
 
     fn current_frame(&self) -> &Frame {

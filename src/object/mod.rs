@@ -23,10 +23,7 @@ pub enum Object {
         env: Rc<RefCell<Environment>>,
     },
     CompiledFunction(CompiledFunction),
-    Closure {
-        func: CompiledFunction,
-        free: Vec<Object>,
-    },
+    Closure(Closure),
     Builtin {
         func: fn(Vec<Object>) -> Result<Object, String>,
     },
@@ -37,6 +34,12 @@ pub struct CompiledFunction {
     pub instructions: Instructions,
     pub num_locals: u8,
     pub num_parameters: u8,
+}
+
+#[derive(Debug, PartialEq, Clone, Eq)]
+pub struct Closure {
+    pub func: CompiledFunction,
+    pub free: Vec<Object>,
 }
 
 pub struct ObjectType(String);
@@ -70,7 +73,7 @@ impl Object {
             Return(_) => RETURN_OBJ.into(),
             Function { .. } => FUNCTION_OBJ.into(),
             CompiledFunction(_) => COMPILED_FUNCTION_OBJ.into(),
-            Closure { .. } => CLOSURE_OBJ.into(),
+            Closure(_) => CLOSURE_OBJ.into(),
             Builtin { .. } => BUILTIN_OBJ.into(),
         })
     }
@@ -121,7 +124,7 @@ impl Object {
             }) => {
                 format!("CompiledFunction({}/{})[..]", num_parameters, num_locals)
             }
-            obj::Closure { .. } => "Closure[..]".to_owned(),
+            obj::Closure(_) => "Closure[..]".to_owned(),
             obj::Function {
                 parameters, body, ..
             } => {
