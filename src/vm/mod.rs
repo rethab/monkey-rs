@@ -4,7 +4,8 @@ mod context;
 pub mod frame;
 mod stack;
 
-use crate::object;
+use super::object;
+use super::object::builtins;
 use code::*;
 use compiler::*;
 use frame::*;
@@ -148,7 +149,7 @@ impl<'a> Vm<'a> {
                     let idx = self.current_frame().read_u8();
                     self.inc_ip(1);
 
-                    if let Some(obj) = object::lookup_builtin_by_idx(idx) {
+                    if let Some(obj) = builtins::lookup_builtin_by_idx(idx) {
                         self.stack.push(obj);
                     } else {
                         panic!("{} is not a builtin", idx);
@@ -194,11 +195,11 @@ impl<'a> Vm<'a> {
         let base_pointer = self.stack.sp() as usize - argc as usize;
         let obj = self.stack.peek_offset(argc as usize);
         match obj.clone() {
-            CompiledFunction {
+            CompiledFunction(object::CompiledFunction {
                 instructions,
                 num_locals,
                 num_parameters,
-            } => {
+            }) => {
                 if num_parameters != argc {
                     return Err(format!(
                         "wrong number of arguments: want={}, got={}",

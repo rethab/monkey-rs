@@ -1,7 +1,7 @@
 use super::ast::{self, *};
 use super::environment::Environment;
-use super::object::Object::*;
-use super::object::*;
+use super::object::Object::{self, *};
+use super::object::{builtins, *};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -120,7 +120,7 @@ fn eval_function(
                     other.tpe()
                 ))
             }
-            None => match lookup_builtin(&ident) {
+            None => match builtins::lookup_builtin(&ident) {
                 Some(Object::Builtin { func }) => {
                     let mut params = Vec::new();
                     for arg in arguments {

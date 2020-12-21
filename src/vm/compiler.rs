@@ -1,5 +1,6 @@
 use super::code::*;
 use super::context::*;
+use super::object::builtins;
 use crate::ast;
 use crate::object;
 
@@ -260,11 +261,11 @@ impl Compiler {
             self.emit(Op::Return, &[])?;
         }
         let instructions = self.leave_scope().instructions;
-        let function = object::Object::CompiledFunction {
+        let function = object::Object::CompiledFunction(object::CompiledFunction {
             instructions,
             num_locals,
             num_parameters: num_parameters as u8,
-        };
+        });
         let idx = self.add_constant(function);
         self.emit(Op::Constant, &[idx])?;
         Ok(ctx.unlocal())
@@ -366,7 +367,7 @@ impl Compiler {
 impl Default for Compiler {
     fn default() -> Self {
         let mut ctx = Context::default();
-        for (idx, name) in object::builtins() {
+        for (idx, name) in builtins::builtins() {
             ctx.define_builtin(idx, name.to_owned());
         }
 
@@ -1007,11 +1008,11 @@ mod tests {
     }
 
     fn function(instructions: Vec<Instructions>) -> object::Object {
-        object::Object::CompiledFunction {
+        object::Object::CompiledFunction(object::CompiledFunction {
             instructions: flatten(instructions),
             num_locals: 0,
             num_parameters: 0,
-        }
+        })
     }
 
     fn function_locals(
@@ -1019,11 +1020,11 @@ mod tests {
         num_locals: u8,
         num_parameters: u8,
     ) -> object::Object {
-        object::Object::CompiledFunction {
+        object::Object::CompiledFunction(object::CompiledFunction {
             instructions: flatten(instructions),
             num_locals,
             num_parameters,
-        }
+        })
     }
 
     fn string(string: String) -> object::Object {
