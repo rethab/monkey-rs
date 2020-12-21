@@ -55,6 +55,9 @@ pub enum Op {
     Call,
     ReturnValue,
     Return,
+
+    // closure
+    Closure,
 }
 
 impl Op {
@@ -96,6 +99,7 @@ impl TryFrom<u8> for Op {
             x if x == Op::Call as u8 => Ok(Op::Call),
             x if x == Op::ReturnValue as u8 => Ok(Op::ReturnValue),
             x if x == Op::Return as u8 => Ok(Op::Return),
+            x if x == Op::Closure as u8 => Ok(Op::Closure),
             other => Err(format!("Not an op code: {}", other)),
         }
     }
@@ -250,6 +254,12 @@ impl<'a> Into<Definition<'a>> for Op {
                 name: "OpReturn",
                 operand_widths: vec![],
             },
+            Closure => Definition {
+                name: "OpClosure",
+                // operand 0: constant index: where we can find the compiled function
+                // operand 1: number of free variables
+                operand_widths: vec![2, 1],
+            },
         }
     }
 }
@@ -291,6 +301,7 @@ pub fn display_instruction(instr: &[u8], offset: usize, buf: &mut String, curren
         Op::Array => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::Hash => buf.push_str(&format!(" {}", read_bigendian(&instr, 1))),
         Op::Call => buf.push_str(&format!(" {}", instr[1])),
+        Op::Closure => buf.push_str(&format!(" {} {}", read_bigendian(&instr, 1), instr[3])),
         Op::ReturnValue => {}
         Op::Return => {}
         Op::True => {}
@@ -401,6 +412,11 @@ mod tests {
             (Op::Return, vec![], vec![Op::Return.byte()]),
             (Op::Array, vec![65534], vec![Op::Array.byte(), 255, 254]),
             (Op::Hash, vec![65534], vec![Op::Hash.byte(), 255, 254]),
+            (
+                Op::Closure,
+                vec![65534, 123],
+                vec![Op::Closure.byte(), 255, 254, 123],
+            ),
         ];
 
         for (op, operands, expected) in tests {
@@ -448,6 +464,7 @@ mod tests {
             make(Op::Call, &vec![124]).unwrap(),
             make(Op::ReturnValue, &vec![]).unwrap(),
             make(Op::Return, &vec![]).unwrap(),
+            make(Op::Closure, &vec![8978, 89]).unwrap(),
             make(Op::Array, &vec![8987]).unwrap(),
             make(Op::Hash, &vec![8988]).unwrap(),
         ];
@@ -481,8 +498,9 @@ mod tests {
             0042 OpCall 124
             0044 OpReturnValue
             0045 OpReturn
-            0046 OpArray 8987
-            0049 OpHash 8988
+            0046 OpClosure 8978 89
+            0050 OpArray 8987
+            0053 OpHash 8988
         "
         .trim()
         .replace("            ", "");

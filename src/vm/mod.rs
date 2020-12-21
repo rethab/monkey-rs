@@ -185,6 +185,9 @@ impl<'a> Vm<'a> {
                     self.stack.set_sp(frame.base_pointer - 1);
                     self.stack.push(object::NULL);
                 }
+                Closure => {
+                    unimplemented!()
+                }
             }
         }
         Ok(())
