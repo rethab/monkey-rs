@@ -147,30 +147,39 @@ impl Context {
 
 #[derive(Clone, Debug)]
 struct FreeVariables {
-    resolved: HashMap<String, (ScopedValue, u8)>, // original
+    resolved: Vec<(String, ScopedValue, u8)>,
 }
 
 impl FreeVariables {
     fn resolve(&mut self, ident: &ast::Identifier, original: ScopedValue) -> u8 {
-        if let Some((_, idx)) = self.resolved.get(&ident.value) {
-            *idx
+        if let Some(idx) = self.get(ident) {
+            idx
         } else {
             let idx = self.resolved.len() as u8;
-            self.resolved.insert(ident.value.clone(), (original, idx));
+            self.insert(ident.clone(), original, idx);
             idx
         }
     }
 
+    fn get(&self, ident: &ast::Identifier) -> Option<u8> {
+        self.resolved
+            .iter()
+            .find(|(name, _, _)| name == &ident.value)
+            .map(|(_, _, idx)| *idx)
+    }
+
+    fn insert(&mut self, ident: ast::Identifier, original: ScopedValue, idx: u8) {
+        self.resolved.push((ident.value, original, idx))
+    }
+
     fn originals(&self) -> Vec<ScopedValue> {
-        self.resolved.values().map(|(v, _)| v.clone()).collect()
+        self.resolved.iter().map(|(_, v, _)| v.clone()).collect()
     }
 }
 
 impl Default for FreeVariables {
     fn default() -> Self {
-        FreeVariables {
-            resolved: HashMap::new(),
-        }
+        FreeVariables { resolved: vec![] }
     }
 }
 
@@ -328,6 +337,35 @@ mod test {
 
         let g = l.unlocal();
         assert_eq!(g.free_symbols().len(), 0);
+    }
+
+    #[test]
+    fn test_resolve_free_variables_sorted() {
+        let g = Context::default();
+
+        let mut l = g.local();
+        l.define(ident("a"));
+        l.define(ident("b"));
+        l.define(ident("c"));
+        l.define(ident("d"));
+        l.define(ident("e"));
+
+        let mut nl = l.local();
+        nl.resolve(&ident("b"));
+        nl.resolve(&ident("a"));
+        nl.resolve(&ident("c"));
+        nl.resolve(&ident("e"));
+        nl.resolve(&ident("d"));
+        assert_eq!(
+            nl.free_symbols(),
+            vec![
+                local(1).unwrap(),
+                local(0).unwrap(),
+                local(2).unwrap(),
+                local(4).unwrap(),
+                local(3).unwrap(),
+            ]
+        );
     }
 
     #[test]

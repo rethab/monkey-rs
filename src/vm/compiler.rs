@@ -240,13 +240,12 @@ impl Compiler {
         self.enter_scope();
         ctx = ctx.local();
         let num_parameters = parameters.len();
-        println!("Paramters: {:?}", parameters);
         for param in parameters {
             ctx.define(param);
         }
         ctx = self.compile_statement(body, ctx)?;
         let num_locals = ctx.num_definitions();
-        let free_symbols = dbg!(ctx.free_symbols());
+        let free_symbols = ctx.free_symbols();
         // implicit return
         if self.last_instruction_is(Op::Pop) {
             self.remove_last_pop();
@@ -907,6 +906,34 @@ mod tests {
     #[test]
     fn test_closures() -> Result<(), String> {
         run_copmiler_test(
+            "fn (a) { fn(b) { a + b } }",
+            vec![
+                function_locals(
+                    vec![
+                        make(Op::GetFree, &vec![0]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Add, &vec![]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    1,
+                ),
+                function_locals(
+                    vec![
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Closure, &vec![0, 1]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    1,
+                ),
+            ],
+            vec![
+                make(Op::Closure, &vec![1, 0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
             "fn (a) { fn(b) { fn (c) { a + b + c } } }",
             vec![
                 function_locals(
@@ -943,35 +970,6 @@ mod tests {
             ],
             vec![
                 make(Op::Closure, &vec![2, 0]).unwrap(),
-                make(Op::Pop, &vec![]).unwrap(),
-            ],
-        )?;
-        assert!(false);
-        run_copmiler_test(
-            "fn (a) { fn(b) { a + b } }",
-            vec![
-                function_locals(
-                    vec![
-                        make(Op::GetFree, &vec![0]).unwrap(),
-                        make(Op::GetLocal, &vec![0]).unwrap(),
-                        make(Op::Add, &vec![]).unwrap(),
-                        make(Op::ReturnValue, &vec![]).unwrap(),
-                    ],
-                    1,
-                    1,
-                ),
-                function_locals(
-                    vec![
-                        make(Op::GetLocal, &vec![0]).unwrap(),
-                        make(Op::Closure, &vec![0, 1]).unwrap(),
-                        make(Op::ReturnValue, &vec![]).unwrap(),
-                    ],
-                    1,
-                    1,
-                ),
-            ],
-            vec![
-                make(Op::Closure, &vec![1, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )?;
@@ -1031,8 +1029,8 @@ mod tests {
                         make(Op::Closure, &vec![5, 1]).unwrap(),
                         make(Op::ReturnValue, &vec![]).unwrap(),
                     ],
-                    0,
                     1,
+                    0,
                 ),
             ],
             vec![
