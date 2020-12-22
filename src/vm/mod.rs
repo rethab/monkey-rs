@@ -204,7 +204,15 @@ impl<'a> Vm<'a> {
                     self.push_closure(func_idx, n_free)?;
                 }
                 GetFree => {
-                    unimplemented!()
+                    let idx = self.current_frame().read_u8();
+                    self.inc_ip(1);
+
+                    let free_vars = &self.current_frame().cl.free;
+                    let val = free_vars
+                        .get(idx as usize)
+                        .unwrap_or_else(|| panic!("Free variable with index {} not found", idx))
+                        .clone();
+                    self.stack.push(val);
                 }
             }
         }
@@ -212,20 +220,26 @@ impl<'a> Vm<'a> {
     }
 
     fn push_closure(&mut self, func_idx: u16, n_free: u8) -> Result<(), String> {
-        if n_free != 0 {
-            panic!("Free variables are not handled yet");
-        }
-
-        if let object::Object::CompiledFunction(func) = self.constants[func_idx as usize].clone() {
-            let cl = object::Closure { func, free: vec![] };
-            self.stack.push(object::Object::Closure(cl));
-            Ok(())
+        let func = if let object::Object::CompiledFunction(func) =
+            self.constants[func_idx as usize].clone()
+        {
+            func
         } else {
-            Err(format!(
+            return Err(format!(
                 "Object at stack position {} is not a function",
                 func_idx
-            ))
+            ));
+        };
+
+        let mut free = Vec::new();
+        let sp_idx_base: usize = self.stack.sp() - n_free as usize;
+        for i in 0..n_free as usize {
+            free.push(self.stack.peek_at(sp_idx_base + i).clone());
         }
+        self.stack.set_sp(sp_idx_base);
+        let cl = object::Closure { func, free };
+        self.stack.push(object::Object::Closure(cl));
+        Ok(())
     }
 
     fn call_function(&mut self, argc: u8) -> Result<(), String> {
@@ -722,6 +736,43 @@ mod tests {
         assert_eq!(
             run_vm_error("append(1, 1)"),
             "first argument to 'append' must be array, but got INTEGER".to_owned()
+        );
+    }
+
+    #[test]
+    fn test_closures() {
+        assert_eq!(
+            run_vm_test(
+                "
+                    let newClosure = fn(a) { fn() { a; }; };
+                    let closure = newClosure(99);
+                    closure();
+                "
+            ),
+            int(99)
+        );
+        assert_eq!(
+            run_vm_test(
+                "
+                    let newAdder = fn(a, b) { fn(c) { a + b + c }; };
+                    let adder = newAdder(1, 2);
+                    adder(8);
+                "
+            ),
+            int(11)
+        );
+        assert_eq!(
+            run_vm_test(
+                "
+                    let newAdder = fn(a, b) {
+                        let c = a + b;
+                        fn(d) { c + d };
+                        };
+                    let adder = newAdder(1, 2);
+                    adder(8);
+                "
+            ),
+            int(11)
         );
     }
 
