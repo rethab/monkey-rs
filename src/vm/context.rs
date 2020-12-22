@@ -21,17 +21,11 @@ pub enum ScopedValue {
 
 impl ScopedValue {
     fn is_global(&self) -> bool {
-        match self {
-            ScopedValue::Global(_) => true,
-            _ => false,
-        }
+        matches!(self, ScopedValue::Global(_))
     }
 
     fn is_builtin(&self) -> bool {
-        match self {
-            ScopedValue::Builtin(_) => true,
-            _ => false,
-        }
+        matches!(self, ScopedValue::Builtin(_))
     }
 }
 
