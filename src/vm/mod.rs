@@ -203,6 +203,9 @@ impl<'a> Vm<'a> {
 
                     self.push_closure(func_idx, n_free)?;
                 }
+                GetFree => {
+                    unimplemented!()
+                }
             }
         }
         Ok(())

@@ -63,6 +63,7 @@ impl Compiler {
                 match ctx.define(name) {
                     ScopedValue::Global(idx) => self.emit(Op::SetGlobal, &[idx as i32]),
                     ScopedValue::Local(idx) => self.emit(Op::SetLocal, &[idx as i32]),
+                    ScopedValue::Free(_) => panic!("Define can never return a free"),
                     ScopedValue::Builtin(_) => panic!("Define can never return a builtin"),
                 }?;
                 Ok(ctx)
@@ -196,11 +197,7 @@ impl Compiler {
                     .resolve(&ident)
                     .ok_or_else(|| format!("Identifier '{}' not found", ident.value))?;
 
-                match value {
-                    ScopedValue::Global(idx) => self.emit(Op::GetGlobal, &[idx as i32]),
-                    ScopedValue::Local(idx) => self.emit(Op::GetLocal, &[idx as i32]),
-                    ScopedValue::Builtin(idx) => self.emit(Op::GetBuiltin, &[idx as i32]),
-                }?;
+                self.load_symbol(value)?;
 
                 Ok(ctx)
             }
@@ -217,11 +214,7 @@ impl Compiler {
                         let value = ctx
                             .resolve(&ident)
                             .ok_or_else(|| format!("Function '{}' not found", ident.value))?;
-                        match value {
-                            ScopedValue::Global(idx) => self.emit(Op::GetGlobal, &[idx as i32]),
-                            ScopedValue::Local(idx) => self.emit(Op::GetLocal, &[idx as i32]),
-                            ScopedValue::Builtin(idx) => self.emit(Op::GetBuiltin, &[idx as i32]),
-                        }?;
+                        self.load_symbol(value)?;
                         ctx
                     }
                     ast::Function::Literal {
@@ -247,11 +240,13 @@ impl Compiler {
         self.enter_scope();
         ctx = ctx.local();
         let num_parameters = parameters.len();
+        println!("Paramters: {:?}", parameters);
         for param in parameters {
             ctx.define(param);
         }
         ctx = self.compile_statement(body, ctx)?;
         let num_locals = ctx.num_definitions();
+        let free_symbols = dbg!(ctx.free_symbols());
         // implicit return
         if self.last_instruction_is(Op::Pop) {
             self.remove_last_pop();
@@ -266,9 +261,25 @@ impl Compiler {
             num_locals,
             num_parameters: num_parameters as u8,
         });
-        let idx = self.add_constant(function);
-        self.emit(Op::Closure, &[idx, 0])?;
+        let func_idx = self.add_constant(function);
+
+        let n_free_symbols = free_symbols.len();
+        for s in free_symbols {
+            self.load_symbol(s)?;
+        }
+
+        self.emit(Op::Closure, &[func_idx, n_free_symbols as i32])?;
         Ok(ctx.unlocal())
+    }
+
+    fn load_symbol(&mut self, val: ScopedValue) -> CompileResult<()> {
+        match val {
+            ScopedValue::Builtin(idx) => self.emit(Op::GetBuiltin, &[idx as i32])?,
+            ScopedValue::Global(idx) => self.emit(Op::GetGlobal, &[idx as i32])?,
+            ScopedValue::Local(idx) => self.emit(Op::GetLocal, &[idx as i32])?,
+            ScopedValue::Free(idx) => self.emit(Op::GetFree, &[idx as i32])?,
+        };
+        Ok(())
     }
 
     fn emit(&mut self, op: Op, operands: &[i32]) -> CompileResult<usize> {
@@ -888,6 +899,146 @@ mod tests {
             ],
             vec![
                 make(Op::Closure, &vec![2, 0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_closures() -> Result<(), String> {
+        run_copmiler_test(
+            "fn (a) { fn(b) { fn (c) { a + b + c } } }",
+            vec![
+                function_locals(
+                    vec![
+                        make(Op::GetFree, &vec![0]).unwrap(),
+                        make(Op::GetFree, &vec![1]).unwrap(),
+                        make(Op::Add, &vec![]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Add, &vec![]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    1,
+                ),
+                function_locals(
+                    vec![
+                        make(Op::GetFree, &vec![0]).unwrap(), // got 13 / local
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Closure, &vec![0, 2]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    1,
+                ),
+                function_locals(
+                    vec![
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Closure, &vec![1, 1]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    1,
+                ),
+            ],
+            vec![
+                make(Op::Closure, &vec![2, 0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        assert!(false);
+        run_copmiler_test(
+            "fn (a) { fn(b) { a + b } }",
+            vec![
+                function_locals(
+                    vec![
+                        make(Op::GetFree, &vec![0]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Add, &vec![]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    1,
+                ),
+                function_locals(
+                    vec![
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Closure, &vec![0, 1]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    1,
+                ),
+            ],
+            vec![
+                make(Op::Closure, &vec![1, 0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "
+                let global = 55;
+                fn() {
+                    let a = 66;
+                    fn() {
+                        let b = 77;
+                        fn() {
+                            let c = 88;
+
+                            global + a + b + c
+                        }
+                    }
+                }
+            ",
+            vec![
+                int(55),
+                int(66),
+                int(77),
+                int(88),
+                function_locals(
+                    vec![
+                        make(Op::Constant, &vec![3]).unwrap(),
+                        make(Op::SetLocal, &vec![0]).unwrap(),
+                        make(Op::GetGlobal, &vec![0]).unwrap(),
+                        make(Op::GetFree, &vec![0]).unwrap(),
+                        make(Op::Add, &vec![]).unwrap(),
+                        make(Op::GetFree, &vec![1]).unwrap(),
+                        make(Op::Add, &vec![]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Add, &vec![]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    0,
+                ),
+                function_locals(
+                    vec![
+                        make(Op::Constant, &vec![2]).unwrap(),
+                        make(Op::SetLocal, &vec![0]).unwrap(),
+                        make(Op::GetFree, &vec![0]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Closure, &vec![4, 2]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    0,
+                ),
+                function_locals(
+                    vec![
+                        make(Op::Constant, &vec![1]).unwrap(),
+                        make(Op::SetLocal, &vec![0]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Closure, &vec![5, 1]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    0,
+                    1,
+                ),
+            ],
+            vec![
+                make(Op::Constant, &vec![0]).unwrap(),
+                make(Op::SetGlobal, &vec![0]).unwrap(),
+                make(Op::Closure, &vec![6, 0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
