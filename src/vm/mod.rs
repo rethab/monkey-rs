@@ -873,6 +873,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_recursive_fibonacci() {
+        assert_eq!(
+            run_vm_test(
+                "
+                    let fibonacci = fn(x) {
+                        if (x < 2) { x }
+                        else { fibonacci(x - 1) + fibonacci(x - 2) }
+                    };
+                    fibonacci(15);
+                "
+            ),
+            int(610)
+        );
+    }
+
     fn compile(input: &str) -> Compiler {
         let p = parse(input);
         let mut c = Compiler::default();

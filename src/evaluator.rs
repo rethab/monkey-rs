@@ -603,6 +603,22 @@ mod test {
     }
 
     #[test]
+    fn test_recurisve_fibonacci() {
+        assert_eq!(
+            evaluate(
+                "
+                    let fibonacci = fn(x) {
+                        if (x < 2) { x }
+                        else { fibonacci(x - 1) + fibonacci(x - 2) }
+                    };
+                    fibonacci(15);
+                "
+            ),
+            Object::Integer(610)
+        );
+    }
+
+    #[test]
     fn test_function_object() {
         let obj = evaluate("fn(x) { x + 2; };");
         let (mut params, body) = match obj {

@@ -180,6 +180,7 @@ impl Node for Expression {
     }
 }
 
+#[derive(Clone)]
 pub struct Program(pub Vec<Statement>);
 
 pub fn token_literal(p: &Program) -> String {

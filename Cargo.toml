@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Reto Hablützel <rethab@protonmail.ch>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dev-dependencies]
+# enable to run benchmarks: criterion = "0.3"
 
-[dependencies]
+[[bench]]
+name = "fib"
+harness = false
