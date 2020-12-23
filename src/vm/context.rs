@@ -1,6 +1,5 @@
 use crate::ast;
 use std::collections::HashMap;
-use std::convert::TryInto;
 
 #[derive(Clone, Debug)]
 pub struct Context {
@@ -17,6 +16,7 @@ pub enum ScopedValue {
     Local(u8),
     Free(u8),
     Builtin(u8),
+    CurrentFunction,
 }
 
 impl ScopedValue {
@@ -44,10 +44,7 @@ impl Scope {
     }
 
     fn is_global(&self) -> bool {
-        match self {
-            Scope::Global(_) => true,
-            Scope::Local(_) => false,
-        }
+        matches!(self, Scope::Global(_))
     }
 }
 
@@ -91,7 +88,9 @@ impl Context {
     }
 
     fn resolve_symbol(&mut self, ident: &ast::Identifier) -> Option<ScopedValue> {
-        self.symbols.get(&ident.value).cloned().or_else(|| {
+        if let Some(symbol) = self.symbols.get(&ident.value).cloned() {
+            Some(symbol)
+        } else {
             let maybe_resolved = self.parent.as_mut().and_then(|p| p.resolve_symbol(ident));
             if let Some(v) = maybe_resolved {
                 Some(if v.is_builtin() || v.is_global() {
@@ -102,7 +101,7 @@ impl Context {
             } else {
                 None
             }
-        })
+        }
     }
 
     fn define_free(&mut self, ident: &ast::Identifier, original: ScopedValue) -> ScopedValue {
@@ -118,19 +117,30 @@ impl Context {
     }
 
     pub fn num_definitions(&self) -> u8 {
-        self.symbols.len().try_into().unwrap()
+        let mut sum = 0;
+        for symbol in self.symbols.values() {
+            if matches!(symbol, ScopedValue::Local(_) | ScopedValue::Global(_)) {
+                sum += 1;
+            }
+        }
+        sum
     }
 
     pub fn free_symbols(&self) -> Vec<ScopedValue> {
         self.free_symbols.originals()
     }
 
-    pub fn local(self) -> Self {
+    pub fn local(self, current_function: Option<String>) -> Self {
+        let mut symbols = HashMap::new();
+        if let Some(fname) = current_function {
+            symbols.insert(fname, ScopedValue::CurrentFunction);
+        }
+
         Self {
             parent: Some(Box::new(self)),
             builtins: HashMap::new(),
             scope: Scope::Local(0),
-            symbols: HashMap::new(),
+            symbols,
             free_symbols: FreeVariables::default(),
         }
     }
@@ -205,7 +215,7 @@ mod test {
         assert_eq!(g.resolve(&ident("b")), global(1));
 
         // local
-        let mut l = g.local();
+        let mut l = g.local(None);
         l.define(ident("a"));
         l.define(ident("c"));
         assert_eq!(l.resolve(&ident("a")), local(0));
@@ -230,7 +240,7 @@ mod test {
         assert_eq!(g.num_definitions(), 1);
 
         // local
-        let mut l = g.local();
+        let mut l = g.local(None);
         l.define(ident("b"));
         l.define(ident("c"));
         assert_eq!(l.resolve(&ident("a")), global(0));
@@ -239,7 +249,7 @@ mod test {
         assert_eq!(l.num_definitions(), 2);
 
         // nested local
-        let mut nl = l.local();
+        let mut nl = l.local(None);
         nl.define(ident("e"));
         nl.define(ident("f"));
         assert_eq!(nl.resolve(&ident("a")), global(0));
@@ -273,18 +283,18 @@ mod test {
         assert_eq!(g.num_definitions(), 1);
 
         // local
-        let mut l = g.local();
+        let mut l = g.local(None);
         l.define(ident("l"));
 
         // nested local
-        let mut nl = l.local();
+        let mut nl = l.local(None);
         nl.define(ident("nl"));
         assert_eq!(nl.resolve(&ident("g")), global(0));
         assert_eq!(nl.resolve(&ident("l")), free(0));
         assert_eq!(nl.resolve(&ident("nl")), local(0));
 
         // double nested local
-        let mut nnl = nl.local();
+        let mut nnl = nl.local(None);
         nnl.define(ident("nnl1"));
         nnl.define(ident("nnl2"));
         assert_eq!(nnl.resolve(&ident("g")), global(0));
@@ -294,7 +304,7 @@ mod test {
         assert_eq!(nnl.resolve(&ident("nnl2")), local(1));
 
         // triple nested local
-        let mut nnnl = nnl.local();
+        let mut nnnl = nnl.local(None);
         nnnl.define(ident("nnnl"));
         assert_eq!(nnnl.resolve(&ident("g")), global(0));
         assert_eq!(nnnl.resolve(&ident("nnnl")), local(0));
@@ -312,17 +322,17 @@ mod test {
         let mut g = Context::default();
         g.define(ident("g"));
 
-        let mut l = g.local();
+        let mut l = g.local(None);
         l.define(ident("l"));
         l.resolve(&ident("g"));
         assert_eq!(l.free_symbols().len(), 0);
 
-        let mut nl = l.local();
+        let mut nl = l.local(None);
         nl.define(ident("nl"));
         nl.resolve(&ident("g"));
         assert_eq!(nl.free_symbols().len(), 0);
 
-        let mut nnl = nl.local();
+        let mut nnl = nl.local(None);
         nnl.define(ident("nnl"));
         nnl.resolve(&ident("nnl"));
         nnl.resolve(&ident("nl"));
@@ -343,14 +353,14 @@ mod test {
     fn test_resolve_free_variables_sorted() {
         let g = Context::default();
 
-        let mut l = g.local();
+        let mut l = g.local(None);
         l.define(ident("a"));
         l.define(ident("b"));
         l.define(ident("c"));
         l.define(ident("d"));
         l.define(ident("e"));
 
-        let mut nl = l.local();
+        let mut nl = l.local(None);
         nl.resolve(&ident("b"));
         nl.resolve(&ident("a"));
         nl.resolve(&ident("c"));
@@ -369,6 +379,66 @@ mod test {
     }
 
     #[test]
+    fn test_resolve_current_function() {
+        let g = Context::default();
+
+        let mut l = g.local(Some("myFunc".into()));
+        assert_eq!(
+            l.resolve(&ident("myFunc")),
+            Some(ScopedValue::CurrentFunction)
+        );
+
+        let mut nl = l.local(None);
+        assert_eq!(nl.resolve(&ident("myFunc")), free(0));
+
+        let mut l = nl.unlocal();
+        assert_eq!(
+            l.resolve(&ident("myFunc")),
+            Some(ScopedValue::CurrentFunction)
+        );
+    }
+
+    #[test]
+    fn test_shadow_current_function() {
+        let g = Context::default();
+
+        let mut l = g.local(Some("myFunc".into()));
+        l.define(ident("myFunc"));
+        assert!(matches!(
+            l.resolve(&ident("myFunc")),
+            Some(ScopedValue::Local(_))
+        ));
+    }
+
+    #[test]
+    fn test_shadow_current_function_nested() {
+        let g = Context::default();
+
+        let l = g.local(Some("myFunc".into()));
+        let mut nl = l.local(Some("fib".into()));
+
+        assert_eq!(
+            nl.resolve(&ident("fib")),
+            Some(ScopedValue::CurrentFunction)
+        );
+        nl.define(ident("fib"));
+        assert!(matches!(
+            nl.resolve(&ident("fib")),
+            Some(ScopedValue::Local(_))
+        ));
+
+        assert!(matches!(
+            nl.resolve(&ident("myFunc")),
+            Some(ScopedValue::Free(_))
+        ));
+        nl.define(ident("myFunc"));
+        assert!(matches!(
+            nl.resolve(&ident("myFunc")),
+            Some(ScopedValue::Local(_))
+        ));
+    }
+
+    #[test]
     fn test_builtins_precedence() {
         let mut g = Context::default();
         g.define_builtin(99, "foo".to_owned());
@@ -378,7 +448,7 @@ mod test {
         assert_eq!(g.resolve(&ident("foo")), builtin(99));
         assert_eq!(g.resolve(&ident("bar")), builtin(2));
 
-        let mut l = g.local();
+        let mut l = g.local(None);
         l.define(ident("foo"));
         l.define(ident("bar"));
         assert_eq!(l.resolve(&ident("foo")), builtin(99));
@@ -394,7 +464,9 @@ mod test {
     #[test]
     #[should_panic]
     fn test_buitins_cannot_define_on_local_ctx() {
-        Context::default().local().define_builtin(4, "a".to_owned());
+        Context::default()
+            .local(None)
+            .define_builtin(4, "a".to_owned());
     }
 
     fn global(x: u16) -> Option<ScopedValue> {

@@ -213,6 +213,7 @@ impl Parser {
 
         Ok(Expression::FunctionLiteral {
             token,
+            name: None,
             parameters,
             body: Box::new(body),
         })
@@ -410,7 +411,11 @@ impl Parser {
         self.next_token();
         self.skip_tpe(token::ASSIGN)?;
 
-        let expression = self.parse_expression(Precedence::Lowest)?;
+        let mut expression = self.parse_expression(Precedence::Lowest)?;
+
+        if let Expression::FunctionLiteral { name: fname, .. } = &mut expression {
+            *fname = Some(name.value.clone());
+        }
 
         if self.peek_token.tpe == token::SEMICOLON {
             self.next_token();
@@ -910,6 +915,30 @@ mod tests {
             _ => panic!("statement in body is not an expression"),
         };
         verify_infix_ident(body_exp, "x", "+", "y");
+    }
+
+    #[test]
+    fn test_function_literal_with_name() {
+        let mut program = parse_statements("let myFunction = fn() {};");
+        let name = match program.pop() {
+            Some(Statement::Let { expression, .. }) => match *expression {
+                Expression::FunctionLiteral { name, .. } => name,
+                _ => panic!("not a function literal"),
+            },
+            _ => panic!("Expected let statement"),
+        };
+
+        assert_eq!(name, Some("myFunction".to_owned()));
+    }
+
+    #[test]
+    fn test_function_literal_without_name() {
+        let name = match statement_expression("fn() { }") {
+            Expression::FunctionLiteral { name, .. } => name,
+            _ => panic!("not a function literal"),
+        };
+
+        assert_eq!(name, None);
     }
 
     #[test]

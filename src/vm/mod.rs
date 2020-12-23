@@ -203,6 +203,10 @@ impl<'a> Vm<'a> {
 
                     self.push_closure(func_idx, n_free)?;
                 }
+                CurrentClosure => {
+                    let cl = self.current_frame().cl.clone();
+                    self.stack.push(object::Object::Closure(cl));
+                }
                 GetFree => {
                     let idx = self.current_frame().read_u8();
                     self.inc_ip(1);
@@ -820,6 +824,52 @@ mod tests {
                 "
             ),
             int(99)
+        );
+    }
+
+    #[test]
+    fn test_recurisve_functions() {
+        assert_eq!(
+            run_vm_test(
+                "
+                    let countDown = fn(x) {
+                        if (x == 0) { return 0; }
+                        else { return countDown(x - 1); }
+                    };
+                    countDown(1);
+                "
+            ),
+            int(0)
+        );
+        assert_eq!(
+            run_vm_test(
+                "
+                    let countDown = fn(x) {
+                        if (x == 0) { return 0; }
+                        else { return countDown(x - 1); }
+                    };
+                    let wrapper = fn() {
+                        countDown(1);
+                    };
+                    wrapper();
+                "
+            ),
+            int(0)
+        );
+        assert_eq!(
+            run_vm_test(
+                "
+                    let wrapper = fn() {
+                        let countDown = fn(x) {
+                            if (x == 0) { return 0; }
+                            else { return countDown(x - 1); }
+                        };
+                        countDown(1);
+                    };
+                    wrapper();
+                "
+            ),
+            int(0)
         );
     }
 

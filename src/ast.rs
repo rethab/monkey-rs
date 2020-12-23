@@ -80,6 +80,7 @@ pub enum Expression {
     },
     FunctionLiteral {
         token: token::Token,
+        name: Option<String>,
         parameters: Vec<Identifier>,
         body: Box<Statement>,
     },
@@ -113,6 +114,7 @@ pub enum Function {
     Identifier(Identifier),
     Literal {
         token: token::Token,
+        name: Option<String>,
         parameters: Vec<Identifier>,
         body: Box<Statement>,
     },
@@ -125,10 +127,12 @@ impl Into<Expression> for Function {
             Identifier(ident) => Expression::Identifier(ident),
             Literal {
                 token,
+                name,
                 parameters,
                 body,
             } => Expression::FunctionLiteral {
                 token,
+                name,
                 parameters,
                 body,
             },
@@ -142,10 +146,12 @@ impl Function {
             Expression::Identifier(identifier) => Function::Identifier(identifier),
             Expression::FunctionLiteral {
                 token,
+                name,
                 parameters,
                 body,
             } => Function::Literal {
                 token,
+                name,
                 parameters,
                 body,
             },
@@ -247,8 +253,12 @@ impl fmt::Display for Expression {
                 container, index, ..
             } => write!(f, "({}[{}])", container, index),
             Expression::FunctionLiteral {
-                parameters, body, ..
+                name,
+                parameters,
+                body,
+                ..
             } => {
+                write!(f, "<{}>", name.as_ref().unwrap_or(&"anonymous".to_owned()))?;
                 write!(f, "fn(")?;
                 let mut first = true;
                 for parameter in parameters {

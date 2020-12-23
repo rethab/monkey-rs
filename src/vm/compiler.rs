@@ -59,12 +59,15 @@ impl Compiler {
             ast::Statement::Let {
                 name, expression, ..
             } => {
+                let value = ctx.define(name);
                 ctx = self.compile_expression(*expression, ctx)?;
-                match ctx.define(name) {
+                match value {
                     ScopedValue::Global(idx) => self.emit(Op::SetGlobal, &[idx as i32]),
                     ScopedValue::Local(idx) => self.emit(Op::SetLocal, &[idx as i32]),
-                    ScopedValue::Free(_) => panic!("Define can never return a free"),
-                    ScopedValue::Builtin(_) => panic!("Define can never return a builtin"),
+                    other => panic!(
+                        "Let definitions can only be global or local, got: {:?}",
+                        other
+                    ),
                 }?;
                 Ok(ctx)
             }
@@ -202,8 +205,11 @@ impl Compiler {
                 Ok(ctx)
             }
             ast::Expression::FunctionLiteral {
-                body, parameters, ..
-            } => self.compile_function_literal(*body, parameters, ctx),
+                body,
+                name,
+                parameters,
+                ..
+            } => self.compile_function_literal(name, *body, parameters, ctx),
             ast::Expression::Call {
                 function,
                 arguments,
@@ -218,8 +224,11 @@ impl Compiler {
                         ctx
                     }
                     ast::Function::Literal {
-                        body, parameters, ..
-                    } => self.compile_function_literal(*body, parameters, ctx)?,
+                        body,
+                        name,
+                        parameters,
+                        ..
+                    } => self.compile_function_literal(name, *body, parameters, ctx)?,
                 };
                 let argc = arguments.len();
                 for arg in arguments {
@@ -233,12 +242,13 @@ impl Compiler {
 
     fn compile_function_literal(
         &mut self,
+        name: Option<String>,
         body: ast::Statement,
         parameters: Vec<ast::Identifier>,
         mut ctx: Context,
     ) -> Result<Context, String> {
         self.enter_scope();
-        ctx = ctx.local();
+        ctx = ctx.local(name);
         let num_parameters = parameters.len();
         for param in parameters {
             ctx.define(param);
@@ -277,6 +287,7 @@ impl Compiler {
             ScopedValue::Global(idx) => self.emit(Op::GetGlobal, &[idx as i32])?,
             ScopedValue::Local(idx) => self.emit(Op::GetLocal, &[idx as i32])?,
             ScopedValue::Free(idx) => self.emit(Op::GetFree, &[idx as i32])?,
+            ScopedValue::CurrentFunction => self.emit(Op::CurrentClosure, &[])?,
         };
         Ok(())
     }
@@ -745,6 +756,81 @@ mod tests {
             vec![function(vec![make(Op::Return, &vec![]).unwrap()])],
             vec![
                 make(Op::Closure, &vec![0, 0]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )
+    }
+
+    #[test]
+    fn test_recursive_functions() -> Result<(), String> {
+        run_copmiler_test(
+            "let countDown = fn(x) { countDown(x - 1) }; countDown(1)",
+            vec![
+                int(1),
+                function_locals(
+                    vec![
+                        make(Op::CurrentClosure, &vec![]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Constant, &vec![0]).unwrap(),
+                        make(Op::Sub, &vec![]).unwrap(),
+                        make(Op::Call, &vec![1]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    1,
+                ),
+                int(1),
+            ],
+            vec![
+                make(Op::Closure, &vec![1, 0]).unwrap(),
+                make(Op::SetGlobal, &vec![0]).unwrap(),
+                make(Op::GetGlobal, &vec![0]).unwrap(),
+                make(Op::Constant, &vec![2]).unwrap(),
+                make(Op::Call, &vec![1]).unwrap(),
+                make(Op::Pop, &vec![]).unwrap(),
+            ],
+        )?;
+        run_copmiler_test(
+            "
+                let wrapper = fn() {
+                    let countDown = fn(x) { countDown(x - 1) };
+                    countDown(1)
+                };
+                wrapper();
+            ",
+            vec![
+                int(1),
+                function_locals(
+                    vec![
+                        make(Op::CurrentClosure, &vec![]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Constant, &vec![0]).unwrap(),
+                        make(Op::Sub, &vec![]).unwrap(),
+                        make(Op::Call, &vec![1]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    1,
+                ),
+                int(1),
+                function_locals(
+                    vec![
+                        make(Op::Closure, &vec![1, 0]).unwrap(),
+                        make(Op::SetLocal, &vec![0]).unwrap(),
+                        make(Op::GetLocal, &vec![0]).unwrap(),
+                        make(Op::Constant, &vec![2]).unwrap(),
+                        make(Op::Call, &vec![1]).unwrap(),
+                        make(Op::ReturnValue, &vec![]).unwrap(),
+                    ],
+                    1,
+                    0,
+                ),
+            ],
+            vec![
+                make(Op::Closure, &vec![3, 0]).unwrap(),
+                make(Op::SetGlobal, &vec![0]).unwrap(),
+                make(Op::GetGlobal, &vec![0]).unwrap(),
+                make(Op::Call, &vec![0]).unwrap(),
                 make(Op::Pop, &vec![]).unwrap(),
             ],
         )
