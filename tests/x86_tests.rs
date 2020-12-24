@@ -1,18 +1,33 @@
 #[cfg(test)]
 mod test {
+    use monkey_interpreter::ast;
+    use monkey_interpreter::lexer::Lexer;
+    use monkey_interpreter::parser::Parser;
+    use monkey_interpreter::x86::Compiler;
     use std::fs;
     use std::process::Command;
 
     #[test]
-    fn test_run() {
-        let program = "
-                MOVQ    $0, %rax
-        count:  INCQ    %rax
-                CMPQ    $13, %rax
-                JLE     count
-        ";
+    fn test_arithmetic_expressions() {
+        assert_eq!(run_to_int("1"), 1);
+        assert_eq!(run_to_int("42"), 42);
+        assert_eq!(run_to_int("5 + 5"), 10);
+        assert_eq!(run_to_int("1 + 2"), 3);
+        assert_eq!(run_to_int("1 + 2 + 3"), 6);
+        assert_eq!(run_to_int("1 + 2 + 3 + 4"), 10);
+    }
 
-        assert_eq!(run(program), 14);
+    fn run_to_int(input: &str) -> i32 {
+        let p = parse(input);
+        let mut c = Compiler::default();
+        c.compile(p)
+            .unwrap_or_else(|err| panic!("Failed to compile: {}", err));
+        let assembly = format!("{}", c);
+        run(&assembly)
+    }
+
+    fn parse(input: &str) -> ast::Program {
+        *Parser::new(Lexer::new(input)).parse_program().unwrap()
     }
 
     /** Runs a fragment of assembly code, which can have one
@@ -33,13 +48,13 @@ mod test {
 
     fn assemble_and_link(filename: &str) -> &str {
         let executable_name = "/tmp/program";
-        let output = dbg!(Command::new("gcc")
+        let output = Command::new("gcc")
             .arg("-no-pie")
             .arg(filename)
             .arg("-o")
-            .arg(executable_name))
-        .output()
-        .expect("Failed to run gcc");
+            .arg(executable_name)
+            .output()
+            .expect("Failed to run gcc");
         if !output.status.success() {
             panic!("gcc did not run successfully: {:?}", output);
         }
@@ -58,28 +73,25 @@ mod test {
     fn wrap_with_preamble_and_epilogue(program: &str) -> String {
         let mut result = String::new();
         result.push_str(PREAMBLE);
-        result.push_str(program);
+        result.push_str(&program.replace('\n', "\n        "));
         result.push_str(EPILOGUE);
         result
     }
 
-    const PREAMBLE: &'static str = "
-        .data
-        .LC0:
-                .string \"%d\"
-        .text
-        .global main
-        main:
-                PUSHQ   %rbp            # store base pointer
-                MOVQ    %rsp, %rbp      # base pointer is our stack pointer
-    ";
+    const PREAMBLE: &'static str = ".data
+.LC0:
+        .string \"%d\"
+.text
+.global main
+main:
+        PUSHQ   %rbp
+        MOVQ    %rsp, %rbp
+        ";
 
-    const EPILOGUE: &'static str = "
-        MOVQ    %rax, %rsi
+    const EPILOGUE: &'static str = "MOVQ    %rax, %rsi
         MOVQ    $.LC0, %rdi
         MOVQ    $0, %rax
         CALL    printf         
         LEAVE
-        RET
-    ";
+        RET";
 }
