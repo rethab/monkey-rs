@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod test {
-    use monkey_interpreter::ast;
-    use monkey_interpreter::lexer::Lexer;
-    use monkey_interpreter::parser::Parser;
-    use monkey_interpreter::x86::Compiler;
+    use monkey::ast;
+    use monkey::lexer::Lexer;
+    use monkey::parser::Parser;
+    use monkey::x86::Compiler;
     use std::collections::HashMap;
     use std::fs;
     use std::process::Command;

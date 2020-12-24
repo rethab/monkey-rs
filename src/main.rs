@@ -1,11 +1,11 @@
-use monkey_interpreter::ast;
-use monkey_interpreter::environment;
-use monkey_interpreter::evaluator;
-use monkey_interpreter::lexer::Lexer;
-use monkey_interpreter::object;
-use monkey_interpreter::parser::Parser;
-use monkey_interpreter::vm;
-use monkey_interpreter::vm::compiler;
+use monkey::ast;
+use monkey::environment;
+use monkey::evaluator;
+use monkey::lexer::Lexer;
+use monkey::object;
+use monkey::parser::Parser;
+use monkey::vm;
+use monkey::vm::compiler;
 
 use std::io;
 use std::io::prelude::*;
