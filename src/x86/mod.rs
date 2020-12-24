@@ -37,14 +37,51 @@ impl Compiler {
         use ast::Expression::*;
         match exp {
             Infix { op, lhs, rhs, .. } => {
-                let r_lhs = self.compile_expression(*lhs)?;
-                let r_rhs = self.compile_expression(*rhs)?;
+                let l = self.compile_expression(*lhs)?;
+                let r = self.compile_expression(*rhs)?;
                 match op.as_str() {
-                    "+" => self.emit(Instruction::Add(r_lhs, r_rhs)),
+                    "+" => {
+                        self.emit(Instruction::Add(l, r));
+                        self.scratch_free(l);
+                        Ok(r)
+                    }
+                    "-" => {
+                        self.emit(Instruction::Sub(r, l));
+                        self.scratch_free(r);
+                        Ok(l)
+                    }
+                    "*" => {
+                        self.emit(Instruction::Move(
+                            AddressingMode::Register(r),
+                            AddressingMode::Register(Register::RAX),
+                        ));
+                        self.emit(Instruction::Mul(l));
+                        self.emit(Instruction::Move(
+                            AddressingMode::Register(Register::RAX),
+                            AddressingMode::Register(l),
+                        ));
+                        self.scratch_free(r);
+                        Ok(l)
+                    }
+                    "/" => {
+                        self.emit(Instruction::Move(
+                            AddressingMode::Immediate(0),
+                            AddressingMode::Register(Register::RDX),
+                        ));
+                        self.emit(Instruction::Move(
+                            AddressingMode::Register(l),
+                            AddressingMode::Register(Register::RAX),
+                        ));
+                        self.emit(Instruction::Div(r));
+                        self.emit(Instruction::Move(
+                            AddressingMode::Register(Register::RAX),
+                            AddressingMode::Register(l),
+                        ));
+                        self.scratch_free(r);
+                        Ok(l)
+                    }
                     other => unimplemented!("infix {}", other),
                 }
-                self.scratch_free(r_lhs);
-                Ok(r_rhs)
             }
             IntLiteral { value, .. } => {
                 let r = self.scratch_alloc();

@@ -3,6 +3,9 @@ use std::fmt;
 pub enum Instruction {
     Move(AddressingMode, AddressingMode),
     Add(Register, Register),
+    Sub(Register, Register),
+    Mul(Register),
+    Div(Register),
 }
 
 pub enum AddressingMode {
@@ -18,7 +21,7 @@ pub enum Register {
     RAX,
     RBX,
     RCX,
-    RDS,
+    RDX,
     RSI,
     RDI,
     RBP,
@@ -39,6 +42,9 @@ impl fmt::Display for Instruction {
         match self {
             Move(src, trg) => write!(f, "MOVQ {}, {}", src, trg),
             Add(src, trg) => write!(f, "ADDQ {}, {}", src, trg),
+            Sub(src, trg) => write!(f, "SUBQ {}, {}", src, trg),
+            Mul(src) => write!(f, "IMULQ {}", src),
+            Div(src) => write!(f, "IDIVQ {}", src),
         }
     }
 }
@@ -68,7 +74,7 @@ impl fmt::Display for Register {
             RAX => write!(f, "%rax"),
             RBX => write!(f, "%rbx"),
             RCX => write!(f, "%rcx"),
-            RDS => write!(f, "%rds"),
+            RDX => write!(f, "%rdx"),
             RSI => write!(f, "%rsi"),
             RDI => write!(f, "%rdi"),
             RBP => write!(f, "%rbp"),

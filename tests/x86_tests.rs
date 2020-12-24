@@ -8,13 +8,22 @@ mod test {
     use std::process::Command;
 
     #[test]
-    fn test_arithmetic_expressions() {
+    fn test_arithmetic_infix_expressions() {
         assert_eq!(run_to_int("1"), 1);
         assert_eq!(run_to_int("42"), 42);
         assert_eq!(run_to_int("5 + 5"), 10);
         assert_eq!(run_to_int("1 + 2"), 3);
         assert_eq!(run_to_int("1 + 2 + 3"), 6);
         assert_eq!(run_to_int("1 + 2 + 3 + 4"), 10);
+        assert_eq!(run_to_int("5 - 5"), 0);
+        assert_eq!(run_to_int("5 - 1"), 4);
+        assert_eq!(run_to_int("5 - 2 - 1"), 2);
+        assert_eq!(run_to_int("5 - 2 + 4"), 7);
+        assert_eq!(run_to_int("5 * 5"), 25);
+        assert_eq!(run_to_int("5 * 5 - 2"), 23);
+        assert_eq!(run_to_int("5 / 5"), 1);
+        assert_eq!(run_to_int("10 / 5 * 2"), 4);
+        assert_eq!(run_to_int("42 / 21 + 7 - 2 * 3"), 3);
     }
 
     fn run_to_int(input: &str) -> i32 {
