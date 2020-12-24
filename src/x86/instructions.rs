@@ -8,6 +8,7 @@ pub enum Instruction {
     Div(Register),
 }
 
+#[allow(dead_code)]
 pub enum AddressingMode {
     Global(String),
     Immediate(u32),
@@ -17,6 +18,7 @@ pub enum AddressingMode {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Register {
     RAX,
     RBX,

@@ -3,7 +3,7 @@ use std::fmt;
 
 mod instructions;
 
-use instructions::*;
+use instructions::{AddressingMode as AM, Instruction::*, *};
 
 pub struct Compiler {
     instructions: Vec<Instruction>,
@@ -23,10 +23,8 @@ impl Compiler {
         match stmt {
             Expression { value, .. } => {
                 let r = self.compile_expression(value)?;
-                self.emit(Instruction::Move(
-                    AddressingMode::Register(r),
-                    AddressingMode::Register(Register::RAX),
-                ))
+                self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
+                self.scratch_free(r);
             }
             other => unimplemented!("compile_statement: {:?}", other),
         }
@@ -39,59 +37,45 @@ impl Compiler {
             Infix { op, lhs, rhs, .. } => {
                 let l = self.compile_expression(*lhs)?;
                 let r = self.compile_expression(*rhs)?;
-                match op.as_str() {
-                    "+" => {
-                        self.emit(Instruction::Add(l, r));
-                        self.scratch_free(l);
-                        Ok(r)
-                    }
-                    "-" => {
-                        self.emit(Instruction::Sub(r, l));
-                        self.scratch_free(r);
-                        Ok(l)
-                    }
-                    "*" => {
-                        self.emit(Instruction::Move(
-                            AddressingMode::Register(r),
-                            AddressingMode::Register(Register::RAX),
-                        ));
-                        self.emit(Instruction::Mul(l));
-                        self.emit(Instruction::Move(
-                            AddressingMode::Register(Register::RAX),
-                            AddressingMode::Register(l),
-                        ));
-                        self.scratch_free(r);
-                        Ok(l)
-                    }
-                    "/" => {
-                        self.emit(Instruction::Move(
-                            AddressingMode::Immediate(0),
-                            AddressingMode::Register(Register::RDX),
-                        ));
-                        self.emit(Instruction::Move(
-                            AddressingMode::Register(l),
-                            AddressingMode::Register(Register::RAX),
-                        ));
-                        self.emit(Instruction::Div(r));
-                        self.emit(Instruction::Move(
-                            AddressingMode::Register(Register::RAX),
-                            AddressingMode::Register(l),
-                        ));
-                        self.scratch_free(r);
-                        Ok(l)
-                    }
-                    other => unimplemented!("infix {}", other),
-                }
+                Ok(self.compile_infix(&op, l, r))
             }
             IntLiteral { value, .. } => {
                 let r = self.scratch_alloc();
-                self.emit(Instruction::Move(
-                    AddressingMode::Immediate(value),
-                    AddressingMode::Register(r),
-                ));
+                self.emit(Move(AM::Immediate(value), AM::Register(r)));
                 Ok(r)
             }
             other => unimplemented!("compile_expression: {:?}", other),
+        }
+    }
+
+    fn compile_infix(&mut self, op: &str, l: Register, r: Register) -> Register {
+        match op {
+            "+" => {
+                self.emit(Add(l, r));
+                self.scratch_free(l);
+                r
+            }
+            "-" => {
+                self.emit(Sub(r, l));
+                self.scratch_free(r);
+                l
+            }
+            "*" => {
+                self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
+                self.emit(Mul(l));
+                self.emit(Move(AM::Register(Register::RAX), AM::Register(l)));
+                self.scratch_free(r);
+                l
+            }
+            "/" => {
+                self.emit(Move(AM::Immediate(0), AM::Register(Register::RDX)));
+                self.emit(Move(AM::Register(l), AM::Register(Register::RAX)));
+                self.emit(Div(r));
+                self.emit(Move(AM::Register(Register::RAX), AM::Register(l)));
+                self.scratch_free(r);
+                l
+            }
+            other => unimplemented!("infix {}", other),
         }
     }
 
@@ -100,14 +84,11 @@ impl Compiler {
     }
 
     fn scratch_alloc(&mut self) -> Register {
-        let next_free = self
-            .scratch_registers
-            .iter_mut()
-            .find(|(_, inuse)| *inuse == false);
+        let next_free = self.scratch_registers.iter_mut().find(|(_, used)| !(*used));
 
-        if let Some((register, inuse)) = next_free {
-            *inuse = true;
-            register.clone()
+        if let Some((register, used)) = next_free {
+            *used = true;
+            *register
         } else {
             panic!("No more free registers");
         }
@@ -116,8 +97,8 @@ impl Compiler {
     fn scratch_free(&mut self, r: Register) {
         let pointer = self.scratch_registers.iter_mut().find(|(reg, _)| *reg == r);
 
-        if let Some((_, inuse)) = pointer {
-            *inuse = false;
+        if let Some((_, used)) = pointer {
+            *used = false;
         } else {
             panic!("Register {} not found in scratch_register!", r);
         }
