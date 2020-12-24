@@ -4,6 +4,7 @@ mod test {
     use monkey_interpreter::lexer::Lexer;
     use monkey_interpreter::parser::Parser;
     use monkey_interpreter::x86::Compiler;
+    use std::collections::HashMap;
     use std::fs;
     use std::process::Command;
 
@@ -26,13 +27,23 @@ mod test {
         assert_eq!(run_to_int("42 / 21 + 7 - 2 * 3"), 3);
     }
 
+    #[test]
+    fn test_global_let_statements() {
+        assert_eq!(run_to_int("let a = 1; a"), 1);
+        assert_eq!(run_to_int("let a = 2; a + 2"), 4);
+        assert_eq!(run_to_int("let a = 2; let b = 3; a * b"), 6);
+        assert_eq!(run_to_int("let a = 2; let b = 3; b"), 3);
+        assert_eq!(run_to_int("let hello = 768; let foo = hello / 2; foo"), 384);
+    }
+
     fn run_to_int(input: &str) -> i32 {
         let p = parse(input);
         let mut c = Compiler::default();
         c.compile(p)
             .unwrap_or_else(|err| panic!("Failed to compile: {}", err));
+        let labels = c.labels.clone();
         let assembly = format!("{}", c);
-        run(&assembly)
+        run(&assembly, labels)
     }
 
     fn parse(input: &str) -> ast::Program {
@@ -41,8 +52,8 @@ mod test {
 
     /** Runs a fragment of assembly code, which can have one
      *  result in rax. The value of that register is returned. */
-    fn run(program: &str) -> i32 {
-        let entire_program = wrap_with_preamble_and_epilogue(program);
+    fn run(program: &str, labels: HashMap<String, i32>) -> i32 {
+        let entire_program = wrap_with_preamble_and_epilogue(program, labels);
         let source_file = write_to_temp_file(&entire_program);
         let executable_name = assemble_and_link(&source_file);
         let result = run_executable(&executable_name);
@@ -79,17 +90,20 @@ mod test {
             .unwrap_or_else(|_| panic!("Failed to parse {} as i32", str))
     }
 
-    fn wrap_with_preamble_and_epilogue(program: &str) -> String {
+    fn wrap_with_preamble_and_epilogue(program: &str, labels: HashMap<String, i32>) -> String {
         let mut result = String::new();
+        result.push_str(".data\n");
+        result.push_str(".LC0:\n        .string \"%d\"\n");
+        for (label, value) in labels {
+            result.push_str(&format!("{}:\n        .quad {}\n", label, value));
+        }
         result.push_str(PREAMBLE);
         result.push_str(&program.replace('\n', "\n        "));
         result.push_str(EPILOGUE);
         result
     }
 
-    const PREAMBLE: &'static str = ".data
-.LC0:
-        .string \"%d\"
+    const PREAMBLE: &'static str = "
 .text
 .global main
 main:
