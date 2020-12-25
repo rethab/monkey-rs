@@ -1,3 +1,5 @@
+extern crate tempfile;
+
 #[cfg(test)]
 mod test {
     use monkey::ast;
@@ -5,8 +7,11 @@ mod test {
     use monkey::parser::Parser;
     use monkey::x86::Compiler;
     use std::collections::HashMap;
-    use std::fs;
+    use std::fs::File;
+    use std::io::prelude::*;
+    use std::path::Path;
     use std::process::Command;
+    use tempfile::{self, TempDir};
 
     #[test]
     fn test_arithmetic_infix_expressions() {
@@ -53,38 +58,38 @@ mod test {
     /** Runs a fragment of assembly code, which can have one
      *  result in rax. The value of that register is returned. */
     fn run(program: &str, labels: HashMap<String, i32>) -> i32 {
+        let dir = TempDir::new().expect("Failed to create tempdir");
+        let source = dir.path().join("program.s");
+        let executable = dir.path().join("program");
+
         let entire_program = wrap_with_preamble_and_epilogue(program, labels);
-        let source_file = write_to_temp_file(&entire_program);
-        let executable_name = assemble_and_link(&source_file);
-        let result = run_executable(&executable_name);
-        result
+        write_to_temp_file(&source, &entire_program);
+        assemble_and_link(&source, &executable);
+        run_executable(&executable)
     }
 
-    fn write_to_temp_file(program: &str) -> &str {
-        let filename = "/tmp/program.s";
-        fs::write(filename, program).expect("Failed to write to file");
-        filename
+    fn write_to_temp_file(path: &Path, program: &str) {
+        let mut file = File::create(path).expect("Failed to create file");
+        writeln!(file, "{}", program).expect("Failed to write to file");
     }
 
-    fn assemble_and_link(filename: &str) -> &str {
-        let executable_name = "/tmp/program";
+    fn assemble_and_link(source: &Path, executable: &Path) {
         let output = Command::new("gcc")
             .arg("-no-pie")
-            .arg(filename)
+            .arg(source)
             .arg("-o")
-            .arg(executable_name)
+            .arg(executable)
             .output()
-            .expect("Failed to run gcc");
+            .unwrap_or_else(|err| panic!("Failed to run gcc on {:?}: {}", source, err));
         if !output.status.success() {
-            panic!("gcc did not run successfully: {:?}", output);
+            panic!("Failed to run gcc on {:?}: {:?}", source, output);
         }
-        executable_name
     }
 
-    fn run_executable(executable_name: &str) -> i32 {
-        let output = Command::new(executable_name)
+    fn run_executable(executable: &Path) -> i32 {
+        let output = Command::new(executable)
             .output()
-            .expect("Failed to run executable");
+            .unwrap_or_else(|err| panic!("Failed to run executable {:?}: {:?}", executable, err));
         let str = String::from_utf8_lossy(&output.stdout);
         str.parse()
             .unwrap_or_else(|_| panic!("Failed to parse {} as i32", str))

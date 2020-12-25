@@ -5,6 +5,7 @@ authors = ["Reto Hablützel <rethab@protonmail.ch>"]
 edition = "2018"
 
 [dev-dependencies]
+tempfile="3.1"
 # enable to run benchmarks: criterion = "0.3"
 
 [[bench]]
