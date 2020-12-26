@@ -14,6 +14,9 @@ mod test {
     use std::process::Command;
     use tempfile::{self, TempDir};
 
+    const TRUE: i32 = -1;
+    const FALSE: i32 = 0;
+
     #[test]
     fn test_arithmetic_infix_expressions() {
         assert_eq!(run_to_int("1"), 1);
@@ -35,24 +38,23 @@ mod test {
 
     #[test]
     fn test_boolean_expressions() {
-        assert_eq!(run_to_int("true"), 1);
-        assert_eq!(run_to_int("false"), 0);
-        assert_eq!(run_to_int("1 == 1"), 1);
-        assert_eq!(run_to_int("1 == 2"), 0);
-        assert_eq!(run_to_int("1 != 2"), 1);
-        assert_eq!(run_to_int("1 != 1"), 0);
-        assert_eq!(run_to_int("1 > 1"), 0);
-        assert_eq!(run_to_int("2 > 1"), 0);
-        assert_eq!(run_to_int("2 < 1"), 0);
-        assert_eq!(run_to_int("2 < 1"), 1);
-        assert_eq!(run_to_int("(1 + 1) < (2 + 2)"), 1);
-        assert_eq!(run_to_int("(1 + 1) == (2 + 2)"), 0);
-        assert_eq!(run_to_int("4 == (2 + 2)"), 1);
-        assert_eq!(run_to_int("!false"), 1);
-        assert_eq!(run_to_int("!true"), 0);
-        assert_eq!(run_to_int("!(2 < 1)"), 1);
-        assert_eq!(run_to_int("!!(2 < 1)"), 0);
-        assert_eq!(run_to_int("!!!(2 < 1)"), 1);
+        assert_eq!(run_to_int("true"), TRUE);
+        assert_eq!(run_to_int("false"), FALSE);
+        assert_eq!(run_to_int("1 == 1"), TRUE);
+        assert_eq!(run_to_int("1 == 2"), FALSE);
+        assert_eq!(run_to_int("1 != 2"), TRUE);
+        assert_eq!(run_to_int("1 != 1"), FALSE);
+        assert_eq!(run_to_int("1 > 1"), FALSE);
+        assert_eq!(run_to_int("2 > 1"), TRUE);
+        assert_eq!(run_to_int("2 < 1"), FALSE);
+        assert_eq!(run_to_int("(1 + 1) < (2 + 2)"), TRUE);
+        assert_eq!(run_to_int("(1 + 1) == (2 + 2)"), FALSE);
+        assert_eq!(run_to_int("4 == (2 + 2)"), TRUE);
+        assert_eq!(run_to_int("!false"), TRUE);
+        assert_eq!(run_to_int("!true"), FALSE);
+        assert_eq!(run_to_int("!(2 < 1)"), TRUE);
+        assert_eq!(run_to_int("!!(2 < 1)"), FALSE);
+        assert_eq!(run_to_int("!!!(2 < 1)"), TRUE);
     }
 
     #[test]
@@ -77,13 +79,12 @@ mod test {
             run_to_int("if (1 < 2) { if (3 < 2) { 1 } else { 3 } } else { 4 }"),
             3
         );
-        assert_eq!(run_to_int("let a = if (200 < 201) { 2 } else { 3 }; a"), 3);
+        assert_eq!(run_to_int("let a = if (200 > 201) { 2 } else { 3 }; a"), 3);
         assert_eq!(
             run_to_int("let a = 3; let b = if (a < 4) { a * 3 } else { a * 2 }; b - a"),
             6
         );
-        // TODO
-        assert_eq!(run_to_int("if (3 < 2) { 3 }"), 11111);
+        assert_eq!(run_to_int("if (3 < 2) { 3 }"), 0);
     }
 
     fn run_to_int(input: &str) -> i32 {

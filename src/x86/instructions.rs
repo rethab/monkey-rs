@@ -6,6 +6,7 @@ pub enum Instruction {
     Sub(Register, Register),
     Mul(Register),
     Div(Register),
+    Xor(AddressingMode, AddressingMode),
     Cmp(AddressingMode, AddressingMode),
     Jmp(Label),
     Je(Label),
@@ -21,11 +22,14 @@ pub struct Label(pub String);
 #[allow(dead_code)]
 pub enum AddressingMode {
     Global(String),
-    Immediate(u32),
+    Immediate(i32),
     Register(Register),
     Indirect(Register),
     BaseRelative { register: Register, offset: u8 },
 }
+
+pub const TRUE: i32 = -1;
+pub const FALSE: i32 = 0;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -57,6 +61,7 @@ impl fmt::Display for Instruction {
             Sub(src, trg) => write!(f, "SUBQ {}, {}", src, trg),
             Mul(src) => write!(f, "IMULQ {}", src),
             Div(src) => write!(f, "IDIVQ {}", src),
+            Xor(val, trg) => write!(f, "XOR {}, {}", val, trg),
             Cmp(op1, op2) => write!(f, "CMPQ {}, {}", op1, op2),
             Jmp(lbl) => write!(f, "JMP {}", lbl.0),
             Je(lbl) => write!(f, "JE {}", lbl.0),

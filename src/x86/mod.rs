@@ -55,14 +55,18 @@ impl Compiler {
                 let r = self.compile_expression(*rhs);
                 self.compile_infix(&op, l, r)
             }
+            Prefix { op, rhs, .. } => {
+                let r = self.compile_expression(*rhs);
+                self.compile_prefix(&op, r)
+            }
             IntLiteral { value, .. } => {
                 let r = self.alloc_scratch();
-                self.emit(Move(AM::Immediate(value), AM::Register(r)));
+                self.emit(Move(AM::Immediate(value as i32), AM::Register(r)));
                 r
             }
             BooleanLiteral { value, .. } => {
                 let r = self.alloc_scratch();
-                let x = if value { 1 } else { 0 };
+                let x = if value { TRUE } else { FALSE };
                 self.emit(Move(AM::Immediate(x), AM::Register(r)));
                 r
             }
@@ -115,7 +119,7 @@ impl Compiler {
                 l
             }
             "<" | ">" | "==" | "!=" => {
-                self.emit(Cmp(AM::Register(l), AM::Register(r)));
+                self.emit(Cmp(AM::Register(r), AM::Register(l)));
                 self.free_scratch(l);
 
                 let true_label = self.create_label();
@@ -128,14 +132,24 @@ impl Compiler {
                     "!=" => self.emit(Jne(true_label.clone())),
                     _ => unreachable!(op),
                 };
-                self.emit(Move(AM::Immediate(0), AM::Register(r)));
+                self.emit(Move(AM::Immediate(FALSE), AM::Register(r)));
                 self.emit(Jmp(after_label.clone()));
                 self.emit(Label(true_label));
-                self.emit(Move(AM::Immediate(1), AM::Register(r)));
+                self.emit(Move(AM::Immediate(TRUE), AM::Register(r)));
                 self.emit(Label(after_label));
-                l
+                r
             }
             other => unimplemented!("infix {}", other),
+        }
+    }
+
+    fn compile_prefix(&mut self, op: &str, r: Register) -> Register {
+        match op {
+            "!" => {
+                self.emit(Xor(AM::Immediate(-1), AM::Register(r)));
+                r
+            }
+            other => unimplemented!("prefix {}", other),
         }
     }
 
@@ -147,35 +161,45 @@ impl Compiler {
     ) -> Option<Register> {
         let done_label = self.create_label();
         let er = self.compile_expression(condition);
-        self.emit(Cmp(AM::Immediate(0), AM::Register(er)));
+        self.emit(Cmp(AM::Immediate(FALSE), AM::Register(er)));
         self.free_scratch(er);
 
-        if let Some(alt) = alternative {
+        // could probably be optimized away
+        let mut result = None;
+
+        let alt = if let Some(alt) = alternative {
             let alt_label = self.create_label();
             self.emit(Je(alt_label.clone()));
-            let maybe_cr = self.compile_statement(consequence);
+            Some((alt_label, alt))
+        } else {
+            self.emit(Je(done_label.clone()));
+            None
+        };
+
+        let maybe_cr = self.compile_statement(consequence);
+        if let Some(cr) = maybe_cr {
+            let r = self.alloc_scratch();
+            self.emit(Move(AM::Register(cr), AM::Register(r)));
+            self.free_scratch(cr);
+            result = Some(r);
+        }
+
+        if let Some((alt_label, alt)) = alt {
             self.emit(Jmp(done_label.clone()));
             self.emit(Label(alt_label));
             let maybe_ar = self.compile_statement(*alt);
-
-            let r = if let (Some(cr), Some(ar)) = (maybe_cr, maybe_ar) {
-                // we need to move, because we have two registers that could be the "return" value.
-                // TODO perhaps this could be improved? we're wasting registers here, because in practice only *either* cr or ar will be used. One idea might be to pass the register to the compile_expression function? that way we could avoid the move
-                self.emit(Move(AM::Register(cr), AM::Register(ar)));
-                self.free_scratch(cr);
-                Some(ar)
-            } else {
-                maybe_cr.or(maybe_ar)
-            };
-            self.emit(Label(done_label));
-
-            r
-        } else {
-            self.emit(Je(done_label.clone()));
-            let cr = self.compile_statement(consequence);
-            self.emit(Label(done_label));
-            cr
+            if let Some(ar) = maybe_ar {
+                let r = result.unwrap_or_else(|| {
+                    let tmp = self.alloc_scratch();
+                    result = Some(tmp);
+                    tmp
+                });
+                self.emit(Move(AM::Register(ar), AM::Register(r)));
+                self.free_scratch(ar);
+            }
         }
+        self.emit(Label(done_label.clone()));
+        result
     }
 
     fn emit(&mut self, instr: Instruction) {
