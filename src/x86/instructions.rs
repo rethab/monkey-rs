@@ -6,7 +6,17 @@ pub enum Instruction {
     Sub(Register, Register),
     Mul(Register),
     Div(Register),
+    Cmp(AddressingMode, AddressingMode),
+    Jmp(Label),
+    Je(Label),
+    Jne(Label),
+    Jl(Label),
+    Jg(Label),
+    Label(Label),
 }
+
+#[derive(Clone)]
+pub struct Label(pub String);
 
 #[allow(dead_code)]
 pub enum AddressingMode {
@@ -47,6 +57,13 @@ impl fmt::Display for Instruction {
             Sub(src, trg) => write!(f, "SUBQ {}, {}", src, trg),
             Mul(src) => write!(f, "IMULQ {}", src),
             Div(src) => write!(f, "IDIVQ {}", src),
+            Cmp(op1, op2) => write!(f, "CMPQ {}, {}", op1, op2),
+            Jmp(lbl) => write!(f, "JMP {}", lbl.0),
+            Je(lbl) => write!(f, "JE {}", lbl.0),
+            Jne(lbl) => write!(f, "JNE {}", lbl.0),
+            Jl(lbl) => write!(f, "JL {}", lbl.0),
+            Jg(lbl) => write!(f, "JG {}", lbl.0),
+            Label(lbl) => write!(f, "{}:", lbl),
         }
     }
 }
@@ -90,5 +107,11 @@ impl fmt::Display for Register {
             R14 => write!(f, "%r14"),
             R15 => write!(f, "%r15"),
         }
+    }
+}
+
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.0)
     }
 }

@@ -9,6 +9,7 @@ mod test {
     use std::collections::HashMap;
     use std::fs::File;
     use std::io::prelude::*;
+    use std::io::Read;
     use std::path::Path;
     use std::process::Command;
     use tempfile::{self, TempDir};
@@ -33,6 +34,28 @@ mod test {
     }
 
     #[test]
+    fn test_boolean_expressions() {
+        assert_eq!(run_to_int("true"), 1);
+        assert_eq!(run_to_int("false"), 0);
+        assert_eq!(run_to_int("1 == 1"), 1);
+        assert_eq!(run_to_int("1 == 2"), 0);
+        assert_eq!(run_to_int("1 != 2"), 1);
+        assert_eq!(run_to_int("1 != 1"), 0);
+        assert_eq!(run_to_int("1 > 1"), 0);
+        assert_eq!(run_to_int("2 > 1"), 0);
+        assert_eq!(run_to_int("2 < 1"), 0);
+        assert_eq!(run_to_int("2 < 1"), 1);
+        assert_eq!(run_to_int("(1 + 1) < (2 + 2)"), 1);
+        assert_eq!(run_to_int("(1 + 1) == (2 + 2)"), 0);
+        assert_eq!(run_to_int("4 == (2 + 2)"), 1);
+        assert_eq!(run_to_int("!false"), 1);
+        assert_eq!(run_to_int("!true"), 0);
+        assert_eq!(run_to_int("!(2 < 1)"), 1);
+        assert_eq!(run_to_int("!!(2 < 1)"), 0);
+        assert_eq!(run_to_int("!!!(2 < 1)"), 1);
+    }
+
+    #[test]
     fn test_global_let_statements() {
         assert_eq!(run_to_int("let a = 1; a"), 1);
         assert_eq!(run_to_int("let a = 2; a + 2"), 4);
@@ -41,14 +64,36 @@ mod test {
         assert_eq!(run_to_int("let hello = 768; let foo = hello / 2; foo"), 384);
     }
 
+    #[test]
+    fn test_if_expressions() {
+        assert_eq!(run_to_int("if (1 < 2) { 3 }"), 3);
+        assert_eq!(run_to_int("if (1 < 2) { 3 } else { 4 }"), 3);
+        assert_eq!(run_to_int("if (2 < 2) { 3 } else { 4 }"), 4);
+        assert_eq!(run_to_int("if (3 < 2) { 3 } else { 4 }"), 4);
+        assert_eq!(run_to_int("if (1 < 2) { 3 + 3 } else { 4 }"), 6);
+        assert_eq!(run_to_int("if (1 < 2) { 3 + 3 } else { 4 }"), 6);
+        assert_eq!(run_to_int("if (1 < 2) { 3 + 3 } else { 2 + 2 }"), 6);
+        assert_eq!(
+            run_to_int("if (1 < 2) { if (3 < 2) { 1 } else { 3 } } else { 4 }"),
+            3
+        );
+        assert_eq!(run_to_int("let a = if (200 < 201) { 2 } else { 3 }; a"), 3);
+        assert_eq!(
+            run_to_int("let a = 3; let b = if (a < 4) { a * 3 } else { a * 2 }; b - a"),
+            6
+        );
+        // TODO
+        assert_eq!(run_to_int("if (3 < 2) { 3 }"), 11111);
+    }
+
     fn run_to_int(input: &str) -> i32 {
         let p = parse(input);
         let mut c = Compiler::default();
         c.compile(p)
             .unwrap_or_else(|err| panic!("Failed to compile: {}", err));
-        let labels = c.labels.clone();
+        let globals = c.globals.clone();
         let assembly = format!("{}", c);
-        run(&assembly, labels)
+        run(&assembly, globals)
     }
 
     fn parse(input: &str) -> ast::Program {
@@ -57,12 +102,12 @@ mod test {
 
     /** Runs a fragment of assembly code, which can have one
      *  result in rax. The value of that register is returned. */
-    fn run(program: &str, labels: HashMap<String, i32>) -> i32 {
+    fn run(program: &str, globals: HashMap<String, i32>) -> i32 {
         let dir = TempDir::new().expect("Failed to create tempdir");
         let source = dir.path().join("program.s");
         let executable = dir.path().join("program");
 
-        let entire_program = wrap_with_preamble_and_epilogue(program, labels);
+        let entire_program = wrap_with_preamble_and_epilogue(program, globals);
         write_to_temp_file(&source, &entire_program);
         assemble_and_link(&source, &executable);
         run_executable(&executable)
@@ -82,6 +127,7 @@ mod test {
             .output()
             .unwrap_or_else(|err| panic!("Failed to run gcc on {:?}: {}", source, err));
         if !output.status.success() {
+            dump_file(source);
             panic!("Failed to run gcc on {:?}: {:?}", source, output);
         }
     }
@@ -95,17 +141,25 @@ mod test {
             .unwrap_or_else(|_| panic!("Failed to parse {} as i32", str))
     }
 
-    fn wrap_with_preamble_and_epilogue(program: &str, labels: HashMap<String, i32>) -> String {
+    fn wrap_with_preamble_and_epilogue(program: &str, globals: HashMap<String, i32>) -> String {
         let mut result = String::new();
         result.push_str(".data\n");
         result.push_str(".LC0:\n        .string \"%d\"\n");
-        for (label, value) in labels {
+        for (label, value) in globals {
             result.push_str(&format!("{}:\n        .quad {}\n", label, value));
         }
         result.push_str(PREAMBLE);
-        result.push_str(&program.replace('\n', "\n        "));
+        result.push_str(program);
         result.push_str(EPILOGUE);
         result
+    }
+
+    fn dump_file(path: &Path) {
+        let mut f = File::open(path).expect("Failed to access file to dump");
+        let mut contents = String::new();
+        f.read_to_string(&mut contents)
+            .expect("Failed to read file to string");
+        println!("Contents of {:?}:\n{}\n", path, contents);
     }
 
     const PREAMBLE: &'static str = "
@@ -114,9 +168,9 @@ mod test {
 main:
         PUSHQ   %rbp
         MOVQ    %rsp, %rbp
-        ";
+";
 
-    const EPILOGUE: &'static str = "MOVQ    %rax, %rsi
+    const EPILOGUE: &'static str = "        MOVQ    %rax, %rsi
         MOVQ    $.LC0, %rdi
         MOVQ    $0, %rax
         CALL    printf         
