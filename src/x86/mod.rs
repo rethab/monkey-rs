@@ -198,7 +198,7 @@ impl Compiler {
                 self.free_scratch(ar);
             }
         }
-        self.emit(Label(done_label.clone()));
+        self.emit(Label(done_label));
         result
     }
 
