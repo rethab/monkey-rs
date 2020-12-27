@@ -1,17 +1,23 @@
 use crate::ast;
 use std::collections::HashMap;
-use std::fmt;
 
+mod context;
 mod instructions;
 
+use context::Context;
 use instructions::Instruction::Label;
 use instructions::{AddressingMode as AM, Instruction::*, *};
 
 pub struct Compiler {
-    instructions: Vec<Instruction>,
+    main_function: Vec<Instruction>,
     pub globals: HashMap<String, i32>,
     scratch_registers: Vec<(Register, bool)>,
     label_idx: u16,
+    ctx: Context,
+    functions: HashMap<instructions::Label, Vec<Instruction>>,
+    // last one is the one we're currently code-generating for.
+    // empty means we are in the main function
+    generating_functions: Vec<instructions::Label>,
 }
 
 impl Compiler {
@@ -37,10 +43,22 @@ impl Compiler {
             Let {
                 name, expression, ..
             } => {
-                let r = self.compile_expression(*expression);
-                self.emit(Move(AM::Register(r), AM::Global(name.value.clone())));
+                if let ast::Expression::FunctionLiteral { body, .. } = *expression {
+                    let label = self.compile_function_literal(*body);
+                    self.ctx.define(name, label);
+                } else {
+                    let r = self.compile_expression(*expression);
+                    self.emit(Move(AM::Register(r), AM::Global(name.value.clone())));
+                    self.free_scratch(r);
+                    self.declare_data(name.value);
+                }
+                None
+            }
+            Return { value, .. } => {
+                let r = self.compile_expression(value);
+                self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
                 self.free_scratch(r);
-                self.declare_data(name.value);
+                self.emit(Ret);
                 None
             }
             other => unimplemented!("compile_statement: {:?}", other),
@@ -87,8 +105,52 @@ impl Compiler {
                     self.emit(Move(AM::Immediate(0), AM::Register(r)));
                     r
                 }),
+            Call {
+                function,
+                arguments,
+                ..
+            } => {
+                assert_eq!(arguments.len(), 0, "arguments not supported yet");
+                self.compile_call(function)
+            }
             other => unimplemented!("compile_expression: {:?}", other),
         }
+    }
+
+    fn compile_function_literal(&mut self, body: ast::Statement) -> instructions::Label {
+        self.compile_function(body)
+    }
+
+    fn compile_call(&mut self, function: ast::Function) -> Register {
+        let label = match function {
+            ast::Function::Identifier(ident) => self.ctx.resolve(&ident),
+            ast::Function::Literal { body, .. } => self.compile_function(*body),
+        };
+
+        self.emit(Call(label));
+        let r = self.alloc_scratch();
+        self.emit(Move(AM::Register(Register::RAX), AM::Register(r)));
+        r
+    }
+
+    fn compile_function(&mut self, body: ast::Statement) -> instructions::Label {
+        let label = self.create_label();
+        self.function_start(label.clone());
+        self.ctx.enter_function();
+        let maybe_reg = self.compile_statement(body);
+
+        // move the last result into RAX
+        if let Some(r) = maybe_reg {
+            self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
+            self.free_scratch(r);
+        } else {
+            self.emit(Move(AM::Immediate(0), AM::Register(Register::RAX)));
+        }
+        self.emit(Ret);
+
+        self.ctx.leave_function();
+        self.function_end();
+        label
     }
 
     fn compile_infix(&mut self, op: &str, l: Register, r: Register) -> Register {
@@ -203,7 +265,23 @@ impl Compiler {
     }
 
     fn emit(&mut self, instr: Instruction) {
-        self.instructions.push(instr)
+        let container = match self.generating_functions.last() {
+            Some(current) => self
+                .functions
+                .get_mut(current)
+                .unwrap_or_else(|| panic!("Currently genrating function '{}' not found", current)),
+            None => &mut self.main_function,
+        };
+        container.push(instr);
+    }
+
+    fn function_start(&mut self, lbl: instructions::Label) {
+        self.generating_functions.push(lbl.clone());
+        self.functions.insert(lbl, vec![]);
+    }
+
+    fn function_end(&mut self) {
+        self.generating_functions.pop().expect("No function to pop");
     }
 
     fn declare_data(&mut self, label: String) {
@@ -222,6 +300,10 @@ impl Compiler {
     }
 
     fn free_scratch(&mut self, r: Register) {
+        if r == Register::RAX {
+            return;
+        }
+
         let pointer = self.scratch_registers.iter_mut().find(|(reg, _)| *reg == r);
 
         if let Some((_, used)) = pointer {
@@ -236,13 +318,25 @@ impl Compiler {
         self.label_idx += 1;
         label
     }
+
+    pub fn main_function(&self) -> Function {
+        Function(self.main_function.clone())
+    }
+
+    pub fn functions(&self) -> HashMap<instructions::Label, Function> {
+        self.functions
+            .iter()
+            .map(|(k, v)| (k.clone(), Function(v.to_vec())))
+            .collect()
+    }
 }
 
 impl Default for Compiler {
     fn default() -> Self {
         use Register::*;
         Self {
-            instructions: vec![],
+            main_function: vec![],
+            globals: HashMap::new(),
             scratch_registers: vec![
                 (RBX, false),
                 (R10, false),
@@ -252,21 +346,10 @@ impl Default for Compiler {
                 (R14, false),
                 (R15, false),
             ],
-            globals: HashMap::new(),
             label_idx: 0,
+            ctx: Context::default(),
+            functions: HashMap::new(),
+            generating_functions: vec![],
         }
-    }
-}
-
-impl fmt::Display for Compiler {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        for instr in self.instructions.iter() {
-            if matches!(instr, Instruction::Label(_)) {
-                writeln!(f, "{}", instr)?;
-            } else {
-                writeln!(f, "        {}", instr)?;
-            }
-        }
-        Ok(())
     }
 }

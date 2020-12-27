@@ -6,7 +6,6 @@ mod test {
     use monkey::lexer::Lexer;
     use monkey::parser::Parser;
     use monkey::x86::Compiler;
-    use std::collections::HashMap;
     use std::fs::File;
     use std::io::prelude::*;
     use std::io::Read;
@@ -84,7 +83,50 @@ mod test {
             run_to_int("let a = 3; let b = if (a < 4) { a * 3 } else { a * 2 }; b - a"),
             6
         );
+        assert_eq!(
+            run_to_int("if (if(false){10}else{false}) {10} else {20}"),
+            20
+        );
         assert_eq!(run_to_int("if (3 < 2) { 3 }"), 0);
+    }
+
+    #[test]
+    fn test_functions_without_arguments() {
+        assert_eq!(run_to_int("let a = fn() { 5; }; a();"), 5);
+        assert_eq!(run_to_int("let a = fn() { 5 + 10; }; a();"), 15);
+        assert_eq!(run_to_int("fn() { 1; }();"), 1);
+        assert_eq!(
+            run_to_int(
+                "
+                    let fa = fn() { 99 };
+                    let fb = fn() { fa(); };
+                    fb();
+                "
+            ),
+            99
+        );
+        assert_eq!(run_to_int("let a = fn() { 5 + 10; }; a();"), 15);
+        assert_eq!(run_to_int("fn() { return 5 + 10; }();"), 15);
+        assert_eq!(
+            run_to_int(
+                "
+                    let one = fn() { return 1 };
+                    let two = fn() { one() + one() };
+                    one() + two()
+                "
+            ),
+            3
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let one = fn() { 1 };
+                    let two = fn() { return 2 };
+                    one()
+                "
+            ),
+            1
+        );
     }
 
     fn run_to_int(input: &str) -> i32 {
@@ -92,9 +134,7 @@ mod test {
         let mut c = Compiler::default();
         c.compile(p)
             .unwrap_or_else(|err| panic!("Failed to compile: {}", err));
-        let globals = c.globals.clone();
-        let assembly = format!("{}", c);
-        run(&assembly, globals)
+        run(c)
     }
 
     fn parse(input: &str) -> ast::Program {
@@ -103,12 +143,13 @@ mod test {
 
     /** Runs a fragment of assembly code, which can have one
      *  result in rax. The value of that register is returned. */
-    fn run(program: &str, globals: HashMap<String, i32>) -> i32 {
+    fn run(c: Compiler) -> i32 {
         let dir = TempDir::new().expect("Failed to create tempdir");
         let source = dir.path().join("program.s");
         let executable = dir.path().join("program");
 
-        let entire_program = wrap_with_preamble_and_epilogue(program, globals);
+        let entire_program = wrap_with_preamble_and_epilogue(c);
+        println!("Program: {}", entire_program);
         write_to_temp_file(&source, &entire_program);
         assemble_and_link(&source, &executable);
         run_executable(&executable)
@@ -142,16 +183,20 @@ mod test {
             .unwrap_or_else(|_| panic!("Failed to parse {} as i32", str))
     }
 
-    fn wrap_with_preamble_and_epilogue(program: &str, globals: HashMap<String, i32>) -> String {
+    fn wrap_with_preamble_and_epilogue(c: Compiler) -> String {
         let mut result = String::new();
         result.push_str(".data\n");
         result.push_str(".LC0:\n        .string \"%d\"\n");
-        for (label, value) in globals {
+        for (label, value) in &c.globals {
             result.push_str(&format!("{}:\n        .quad {}\n", label, value));
         }
         result.push_str(PREAMBLE);
-        result.push_str(program);
+        result.push_str(&format!("{}", c.main_function()));
         result.push_str(EPILOGUE);
+        for (label, instructions) in c.functions() {
+            result.push_str(&format!("{}:\n", label));
+            result.push_str(&format!("{}", instructions));
+        }
         result
     }
 
@@ -176,5 +221,6 @@ main:
         MOVQ    $0, %rax
         CALL    printf         
         LEAVE
-        RET";
+        RET
+";
 }

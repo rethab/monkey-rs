@@ -1,5 +1,6 @@
 use std::fmt;
 
+#[derive(Clone, Debug)]
 pub enum Instruction {
     Move(AddressingMode, AddressingMode),
     Add(Register, Register),
@@ -13,12 +14,17 @@ pub enum Instruction {
     Jne(Label),
     Jl(Label),
     Jg(Label),
+    Call(Label),
+    Ret,
     Label(Label),
 }
 
-#[derive(Clone)]
+pub struct Function(pub Vec<Instruction>);
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Label(pub String);
 
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub enum AddressingMode {
     Global(String),
@@ -31,7 +37,7 @@ pub enum AddressingMode {
 pub const TRUE: i32 = -1;
 pub const FALSE: i32 = 0;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[allow(dead_code)]
 pub enum Register {
     RAX,
@@ -68,6 +74,8 @@ impl fmt::Display for Instruction {
             Jne(lbl) => write!(f, "JNE {}", lbl.0),
             Jl(lbl) => write!(f, "JL {}", lbl.0),
             Jg(lbl) => write!(f, "JG {}", lbl.0),
+            Call(lbl) => write!(f, "CALL {}", lbl.0),
+            Ret => write!(f, "RET"),
             Label(lbl) => write!(f, "{}:", lbl),
         }
     }
@@ -118,5 +126,18 @@ impl fmt::Display for Register {
 impl fmt::Display for Label {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        for instr in self.0.iter() {
+            if matches!(instr, Instruction::Label(_)) {
+                writeln!(f, "{}", instr)?;
+            } else {
+                writeln!(f, "        {}", instr)?;
+            }
+        }
+        Ok(())
     }
 }
