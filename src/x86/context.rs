@@ -6,13 +6,19 @@ use std::mem;
 
 pub struct Context(Inner);
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Ref {
+    Label(Label),
+    Stack(usize),
+}
+
 struct Inner {
     parent: Option<Box<Inner>>,
-    values: HashMap<String, Label>,
+    values: HashMap<String, Ref>,
 }
 
 impl Inner {
-    pub fn resolve(&self, ident: &Identifier) -> Label {
+    pub fn resolve(&self, ident: &Identifier) -> Ref {
         self.values.get(&ident.value).cloned().unwrap_or_else(|| {
             if let Some(p) = self.parent.as_ref() {
                 (*p).resolve(ident)
@@ -25,10 +31,14 @@ impl Inner {
 
 impl Context {
     pub fn define(&mut self, ident: Identifier, lbl: Label) {
-        self.0.values.insert(ident.value, lbl);
+        self.0.values.insert(ident.value, Ref::Label(lbl));
     }
 
-    pub fn resolve(&self, ident: &Identifier) -> Label {
+    pub fn define_stack(&mut self, ident: Identifier, offset: usize) {
+        self.0.values.insert(ident.value, Ref::Stack(offset));
+    }
+
+    pub fn resolve(&self, ident: &Identifier) -> Ref {
         self.0.resolve(ident)
     }
 
@@ -66,8 +76,8 @@ mod tests {
         let mut ctx = Context::default();
         ctx.define(ident("a"), label("l1"));
         ctx.define(ident("b"), label("l2"));
-        assert_eq!(ctx.resolve(&ident("a")), label("l1"));
-        assert_eq!(ctx.resolve(&ident("b")), label("l2"));
+        assert_eq!(ctx.resolve(&ident("a")), ref_label("l1"));
+        assert_eq!(ctx.resolve(&ident("b")), ref_label("l2"));
     }
 
     #[test]
@@ -75,7 +85,7 @@ mod tests {
         let mut ctx = Context::default();
         ctx.define(ident("a"), label("l1"));
         ctx.enter_function();
-        assert_eq!(ctx.resolve(&ident("a")), label("l1"));
+        assert_eq!(ctx.resolve(&ident("a")), ref_label("l1"));
     }
 
     #[test]
@@ -84,7 +94,7 @@ mod tests {
         ctx.define(ident("a"), label("l1"));
         ctx.enter_function();
         ctx.define(ident("a"), label("l2"));
-        assert_eq!(ctx.resolve(&ident("a")), label("l2"));
+        assert_eq!(ctx.resolve(&ident("a")), ref_label("l2"));
     }
 
     #[test]
@@ -94,7 +104,7 @@ mod tests {
         ctx.enter_function();
         ctx.define(ident("a"), label("l2"));
         ctx.enter_function();
-        assert_eq!(ctx.resolve(&ident("a")), label("l2"));
+        assert_eq!(ctx.resolve(&ident("a")), ref_label("l2"));
     }
 
     #[test]
@@ -109,6 +119,10 @@ mod tests {
 
     fn label(name: &str) -> Label {
         Label(name.to_owned())
+    }
+
+    fn ref_label(name: &str) -> Ref {
+        Ref::Label(Label(name.to_owned()))
     }
 
     fn ident(name: &str) -> Identifier {

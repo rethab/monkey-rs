@@ -14,6 +14,8 @@ pub enum Instruction {
     Jne(Label),
     Jl(Label),
     Jg(Label),
+    Push(Register),
+    Pop(Register),
     Call(Label),
     Ret,
     Label(Label),
@@ -75,6 +77,8 @@ impl fmt::Display for Instruction {
             Jl(lbl) => write!(f, "JL {}", lbl.0),
             Jg(lbl) => write!(f, "JG {}", lbl.0),
             Call(lbl) => write!(f, "CALL {}", lbl.0),
+            Push(r) => write!(f, "PUSHQ {}", r),
+            Pop(r) => write!(f, "POPQ {}", r),
             Ret => write!(f, "RET"),
             Label(lbl) => write!(f, "{}:", lbl),
         }

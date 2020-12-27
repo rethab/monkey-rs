@@ -178,6 +178,52 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_function_arguments() {
+        assert_eq!(run_to_int("fn(a) { a }(5)"), 5);
+        assert_eq!(run_to_int("fn(a) { a }(5 + 5)"), 10);
+        assert_eq!(run_to_int("fn(a) { a + a }(5)"), 10);
+        assert_eq!(run_to_int("fn(a, b) { b / a }(5 * 2, 4 / 4)"), 10);
+        assert_eq!(run_to_int("let div = fn(a, b) { a / b }; div(10, 2)"), 5);
+        assert_eq!(
+            run_to_int(
+                "
+                    let max = fn(a, b) { if (a > b) { a } else { b } };
+                    max(10, 11)
+                "
+            ),
+            11
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let max = fn(a, b) { if (a > b) { a } else { b } };
+                    let maxthree = fn(a, b, c) { max(a, max(b, c)) };
+                    maxthree(1, 3, 2)
+                "
+            ),
+            3
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let four = fn(a, b, c, d) { (a + b) * c / d };
+                    four(2, 5, 4, 2)
+                "
+            ),
+            14
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let five = fn(a, b, c, d, e) { (a + b) * c / d - e };
+                    four(2, 5, 4, 2, 4)
+                "
+            ),
+            10
+        );
+    }
+
     fn run_to_int(input: &str) -> i32 {
         let p = parse(input);
         let mut c = Compiler::default();
@@ -228,7 +274,7 @@ mod test {
             .unwrap_or_else(|err| panic!("Failed to run executable {:?}: {:?}", executable, err));
         let str = String::from_utf8_lossy(&output.stdout);
         str.parse()
-            .unwrap_or_else(|_| panic!("Failed to parse {} as i32", str))
+            .unwrap_or_else(|_| panic!("Failed to parse '{}' as i32", str))
     }
 
     fn wrap_with_preamble_and_epilogue(c: Compiler) -> String {

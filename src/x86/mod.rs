@@ -4,9 +4,9 @@ use std::collections::HashMap;
 mod context;
 mod instructions;
 
-use context::Context;
+use context::{Context, Ref};
 use instructions::Instruction::Label;
-use instructions::{AddressingMode as AM, Instruction::*, *};
+use instructions::{AddressingMode as AM, Instruction::*, Register::*, *};
 
 pub struct Compiler {
     main_function: Vec<Instruction>,
@@ -23,10 +23,10 @@ pub struct Compiler {
 impl Compiler {
     pub fn compile(&mut self, p: ast::Program) {
         if let Some(r) = self.compile_statements(p.0) {
-            self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
+            self.emit(Move(AM::Register(r), AM::Register(RAX)));
             self.free_scratch(r);
         } else {
-            self.emit(Move(AM::Immediate(0), AM::Register(Register::RAX)));
+            self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
         }
     }
 
@@ -51,8 +51,11 @@ impl Compiler {
             Let {
                 name, expression, ..
             } => {
-                if let ast::Expression::FunctionLiteral { body, .. } = *expression {
-                    let label = self.compile_function_literal(*body);
+                if let ast::Expression::FunctionLiteral {
+                    parameters, body, ..
+                } = *expression
+                {
+                    let label = self.compile_function_literal(parameters, *body);
                     self.ctx.define(name, label);
                 } else {
                     let r = self.compile_expression(*expression);
@@ -64,7 +67,8 @@ impl Compiler {
             }
             Return { value, .. } => {
                 let r = self.compile_expression(value);
-                self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
+                self.emit(Move(AM::Register(r), AM::Register(RAX)));
+                self.emit_function_epilogue();
                 self.free_scratch(r);
                 self.emit(Ret);
                 None
@@ -95,9 +99,14 @@ impl Compiler {
                 self.emit(Move(AM::Immediate(x), AM::Register(r)));
                 r
             }
-            Identifier(ast::Identifier { value, .. }) => {
+            Identifier(ident) => {
                 let r = self.alloc_scratch();
-                self.emit(Move(AM::Global(value), AM::Register(r)));
+                match self.ctx.resolve(ident) {
+                    Ref::Label(value) => self.emit(Move(AM::Global(value), AM::Register(r))),
+                    Ref::Stack(offset) => {
+                        self.emit(Move(AM::BaseRelative(RBP, value), AM::Register(r)))
+                    }
+                }
                 r
             }
             If {
@@ -116,44 +125,82 @@ impl Compiler {
                 function,
                 arguments,
                 ..
-            } => {
-                assert_eq!(arguments.len(), 0, "arguments not supported yet");
-                self.compile_call(function)
-            }
+            } => self.compile_call(arguments, function),
             other => unimplemented!("compile_expression: {:?}", other),
         }
     }
 
-    fn compile_function_literal(&mut self, body: ast::Statement) -> instructions::Label {
-        self.compile_function(body)
-    }
-
-    fn compile_call(&mut self, function: ast::Function) -> Register {
+    fn compile_call(
+        &mut self,
+        arguments: Vec<ast::Expression>,
+        function: ast::Function,
+    ) -> Register {
         let label = match function {
-            ast::Function::Identifier(ident) => self.ctx.resolve(&ident),
-            ast::Function::Literal { body, .. } => self.compile_function(*body),
+            ast::Function::Identifier(ident) => {
+                if let Ref::Label(lbl) = self.ctx.resolve(&ident) {
+                    lbl
+                } else {
+                    panic!("Functions must resolve to label");
+                }
+            }
+            ast::Function::Literal {
+                parameters, body, ..
+            } => self.compile_function_literal(parameters, *body),
         };
+
+        for (idx, arg) in arguments.into_iter().enumerate() {
+            let r = self.compile_expression(arg);
+            let arg_r = *self
+                .arg_registers()
+                .get(idx)
+                .unwrap_or_else(|| panic!("stack arguments not supported yet"));
+            self.emit(Move(AM::Register(r), AM::Register(arg_r)));
+            self.free_scratch(r);
+        }
 
         self.emit(Call(label));
         let r = self.alloc_scratch();
-        self.emit(Move(AM::Register(Register::RAX), AM::Register(r)));
+        self.emit(Move(AM::Register(RAX), AM::Register(r)));
         r
     }
 
-    fn compile_function(&mut self, body: ast::Statement) -> instructions::Label {
+    fn compile_function_literal(
+        &mut self,
+        parameters: Vec<ast::Identifier>,
+        body: ast::Statement,
+    ) -> instructions::Label {
         let label = self.create_label();
         self.function_start(label.clone());
         self.ctx.enter_function();
+
+        // prologue
+        self.emit(Push(RBP));
+        self.emit(Move(AM::Register(RSP), AM::Register(RBP)));
+
+        // setup arguments
+        for (idx, p) in parameters.into_iter().enumerate() {
+            if let Some(r) = self.arg_registers().get(idx as usize) {
+                self.emit(Push(*r));
+                self.ctx.define_stack(p, idx);
+            } else {
+                panic!("stack arguments not handled yet");
+            }
+        }
+
+        // compile body
         let maybe_reg = self.compile_statement(body);
 
-        // move the last result into RAX
-        if let Some(r) = maybe_reg {
-            self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
-            self.free_scratch(r);
-        } else {
-            self.emit(Move(AM::Immediate(0), AM::Register(Register::RAX)));
+        // setup epilogue if there was no return statement
+        if !matches!(self.last_emitted(), Some(Ret)) {
+            self.emit_function_epilogue();
+            if let Some(r) = maybe_reg {
+                self.emit(Move(AM::Register(r), AM::Register(RAX)));
+                self.free_scratch(r);
+            } else {
+                self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
+            }
+            self.emit(Ret);
         }
-        self.emit(Ret);
 
         self.ctx.leave_function();
         self.function_end();
@@ -173,17 +220,17 @@ impl Compiler {
                 l
             }
             "*" => {
-                self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
+                self.emit(Move(AM::Register(r), AM::Register(RAX)));
                 self.emit(Mul(l));
-                self.emit(Move(AM::Register(Register::RAX), AM::Register(l)));
+                self.emit(Move(AM::Register(RAX), AM::Register(l)));
                 self.free_scratch(r);
                 l
             }
             "/" => {
-                self.emit(Move(AM::Immediate(0), AM::Register(Register::RDX)));
-                self.emit(Move(AM::Register(l), AM::Register(Register::RAX)));
+                self.emit(Move(AM::Immediate(0), AM::Register(RDX)));
+                self.emit(Move(AM::Register(l), AM::Register(RAX)));
                 self.emit(Div(r));
-                self.emit(Move(AM::Register(Register::RAX), AM::Register(l)));
+                self.emit(Move(AM::Register(RAX), AM::Register(l)));
                 self.free_scratch(r);
                 l
             }
@@ -271,15 +318,27 @@ impl Compiler {
         result
     }
 
+    fn last_emitted(&mut self) -> Option<&Instruction> {
+        self.emitting_container().last()
+    }
+
+    fn emit_function_epilogue(&mut self) {
+        self.emit(Move(AM::Register(RBP), AM::Register(RSP)));
+        self.emit(Pop(RBP));
+    }
+
     fn emit(&mut self, instr: Instruction) {
-        let container = match self.generating_functions.last() {
+        self.emitting_container().push(instr);
+    }
+
+    fn emitting_container(&mut self) -> &mut Vec<Instruction> {
+        match self.generating_functions.last() {
             Some(current) => self
                 .functions
                 .get_mut(current)
                 .unwrap_or_else(|| panic!("Currently genrating function '{}' not found", current)),
             None => &mut self.main_function,
-        };
-        container.push(instr);
+        }
     }
 
     fn function_start(&mut self, lbl: instructions::Label) {
@@ -307,7 +366,7 @@ impl Compiler {
     }
 
     fn free_scratch(&mut self, r: Register) {
-        if r == Register::RAX {
+        if r == RAX {
             return;
         }
 
@@ -318,6 +377,11 @@ impl Compiler {
         } else {
             panic!("Register {} not found in scratch_register!", r);
         }
+    }
+
+    fn arg_registers(&self) -> Vec<Register> {
+        // todo could be constant?
+        vec![RDI, RSI, RDX, RCX]
     }
 
     fn create_label(&mut self) -> instructions::Label {
@@ -340,7 +404,6 @@ impl Compiler {
 
 impl Default for Compiler {
     fn default() -> Self {
-        use Register::*;
         Self {
             main_function: vec![],
             globals: HashMap::new(),
