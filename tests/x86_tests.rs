@@ -106,11 +106,10 @@ mod test {
             99
         );
         assert_eq!(run_to_int("let a = fn() { 5 + 10; }; a();"), 15);
-        assert_eq!(run_to_int("fn() { return 5 + 10; }();"), 15);
         assert_eq!(
             run_to_int(
                 "
-                    let one = fn() { return 1 };
+                    let one = fn() { 1 };
                     let two = fn() { one() + one() };
                     one() + two()
                 "
@@ -121,19 +120,68 @@ mod test {
             run_to_int(
                 "
                     let one = fn() { 1 };
-                    let two = fn() { return 2 };
+                    let two = fn() { 2 };
                     one()
                 "
             ),
             1
+        );
+        assert_eq!(run_to_int("5; 4;"), 4);
+    }
+
+    #[test]
+    fn test_return_statement() {
+        assert_eq!(run_to_int("let a = fn() { return 5; }; a();"), 5);
+        assert_eq!(run_to_int("let a = fn() { return 5 + 10; }; a();"), 15);
+        assert_eq!(
+            run_to_int(
+                "
+                fn() {
+                    if (true) { return 5 }
+                    else { return 4 }
+                }();
+                "
+            ),
+            5
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                fn() {
+                    if (2 > 1 ) { return 5 }
+                    4
+                }();
+                "
+            ),
+            5
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                fn() {
+                    if (2 > 4 ) { return 5 }
+                    4
+                }();
+                "
+            ),
+            4
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                fn() {
+                    return if (2 > 3) { 5 } else { 4 }
+                }();
+                "
+            ),
+            4
         );
     }
 
     fn run_to_int(input: &str) -> i32 {
         let p = parse(input);
         let mut c = Compiler::default();
-        c.compile(p)
-            .unwrap_or_else(|err| panic!("Failed to compile: {}", err));
+        c.compile(p);
         run(c)
     }
 

@@ -21,25 +21,33 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn compile(&mut self, p: ast::Program) -> Result<(), String> {
-        for stmt in p.0 {
-            if let Some(r) = self.compile_statement(stmt) {
-                self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
-                self.free_scratch(r);
-            } else {
-                self.emit(Move(AM::Immediate(0), AM::Register(Register::RAX)));
+    pub fn compile(&mut self, p: ast::Program) {
+        if let Some(r) = self.compile_statements(p.0) {
+            self.emit(Move(AM::Register(r), AM::Register(Register::RAX)));
+            self.free_scratch(r);
+        } else {
+            self.emit(Move(AM::Immediate(0), AM::Register(Register::RAX)));
+        }
+    }
+
+    fn compile_statements(&mut self, statements: Vec<ast::Statement>) -> Option<Register> {
+        let mut last_reg = None;
+
+        for stmt in statements {
+            let maybe_r = self.compile_statement(stmt);
+
+            if let Some(prev_last) = maybe_r.and_then(|r| last_reg.replace(r)) {
+                self.free_scratch(prev_last);
             }
         }
-        Ok(())
+        last_reg
     }
 
     fn compile_statement(&mut self, stmt: ast::Statement) -> Option<Register> {
         use ast::Statement::*;
         match stmt {
             Expression { value, .. } => Some(self.compile_expression(value)),
-            Block { mut statements, .. } if statements.len() == 1 => {
-                self.compile_statement(statements.remove(0))
-            }
+            Block { statements, .. } => self.compile_statements(statements),
             Let {
                 name, expression, ..
             } => {
@@ -61,7 +69,6 @@ impl Compiler {
                 self.emit(Ret);
                 None
             }
-            other => unimplemented!("compile_statement: {:?}", other),
         }
     }
 
