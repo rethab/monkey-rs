@@ -183,7 +183,7 @@ mod test {
         assert_eq!(run_to_int("fn(a) { a }(5)"), 5);
         assert_eq!(run_to_int("fn(a) { a }(5 + 5)"), 10);
         assert_eq!(run_to_int("fn(a) { a + a }(5)"), 10);
-        assert_eq!(run_to_int("fn(a, b) { b / a }(5 * 2, 4 / 4)"), 10);
+        assert_eq!(run_to_int("fn(a, b) { b / a }(4 / 2, 5 * 2)"), 5);
         assert_eq!(run_to_int("let div = fn(a, b) { a / b }; div(10, 2)"), 5);
         assert_eq!(
             run_to_int(

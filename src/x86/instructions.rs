@@ -33,7 +33,7 @@ pub enum AddressingMode {
     Immediate(i32),
     Register(Register),
     Indirect(Register),
-    BaseRelative { register: Register, offset: u8 },
+    BaseRelative { register: Register, offset: usize },
 }
 
 pub const TRUE: i32 = -1;

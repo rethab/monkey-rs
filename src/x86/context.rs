@@ -35,6 +35,9 @@ impl Context {
     }
 
     pub fn define_stack(&mut self, ident: Identifier, offset: usize) {
+        if self.0.parent.is_none() {
+            panic!("Cannot define stack in root");
+        }
         self.0.values.insert(ident.value, Ref::Stack(offset));
     }
 
@@ -89,6 +92,15 @@ mod tests {
     }
 
     #[test]
+    fn resolve_stack_in_parent() {
+        let mut ctx = Context::default();
+        ctx.enter_function();
+        ctx.define_stack(ident("b"), 33);
+        ctx.enter_function();
+        assert_eq!(ctx.resolve(&ident("b")), ref_stack(33));
+    }
+
+    #[test]
     fn resolve_with_precedence() {
         let mut ctx = Context::default();
         ctx.define(ident("a"), label("l1"));
@@ -98,23 +110,53 @@ mod tests {
     }
 
     #[test]
+    fn resolve_stack_with_precedence() {
+        let mut ctx = Context::default();
+        ctx.enter_function();
+        ctx.define_stack(ident("b"), 33);
+        ctx.enter_function();
+        ctx.define_stack(ident("b"), 34);
+        assert_eq!(ctx.resolve(&ident("b")), ref_stack(34));
+    }
+
+    #[test]
     fn resolve_with_precedence_in_parent() {
         let mut ctx = Context::default();
+        ctx.enter_function();
         ctx.define(ident("a"), label("l1"));
+        ctx.define_stack(ident("b"), 33);
         ctx.enter_function();
         ctx.define(ident("a"), label("l2"));
+        ctx.define_stack(ident("b"), 34);
         ctx.enter_function();
-        assert_eq!(ctx.resolve(&ident("a")), ref_label("l2"));
+        assert_eq!(ctx.resolve(&ident("b")), ref_stack(34));
     }
 
     #[test]
     #[should_panic]
-    fn not_resolve_from_child() {
+    fn not_resolve_label_from_child() {
         let mut ctx = Context::default();
         ctx.enter_function();
         ctx.define(ident("a"), label("l1"));
         ctx.leave_function();
         ctx.resolve(&ident("a"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn not_resolve_stack_from_child() {
+        let mut ctx = Context::default();
+        ctx.enter_function();
+        ctx.define_stack(ident("a"), 33);
+        ctx.leave_function();
+        ctx.resolve(&ident("a"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn not_define_stack_in_root() {
+        let mut ctx = Context::default();
+        ctx.define_stack(ident("a"), 33);
     }
 
     fn label(name: &str) -> Label {
@@ -123,6 +165,10 @@ mod tests {
 
     fn ref_label(name: &str) -> Ref {
         Ref::Label(Label(name.to_owned()))
+    }
+
+    fn ref_stack(x: usize) -> Ref {
+        Ref::Stack(x)
     }
 
     fn ident(name: &str) -> Identifier {

@@ -10,7 +10,7 @@ use instructions::{AddressingMode as AM, Instruction::*, Register::*, *};
 
 pub struct Compiler {
     main_function: Vec<Instruction>,
-    pub globals: HashMap<String, i32>,
+    pub globals: HashMap<instructions::Label, i32>,
     scratch_registers: Vec<(Register, bool)>,
     label_idx: u16,
     ctx: Context,
@@ -61,7 +61,10 @@ impl Compiler {
                     let r = self.compile_expression(*expression);
                     self.emit(Move(AM::Register(r), AM::Global(name.value.clone())));
                     self.free_scratch(r);
-                    self.declare_data(name.value);
+
+                    let label = instructions::Label(name.clone().value);
+                    self.declare_data(label.clone());
+                    self.ctx.define(name, label);
                 }
                 None
             }
@@ -101,11 +104,15 @@ impl Compiler {
             }
             Identifier(ident) => {
                 let r = self.alloc_scratch();
-                match self.ctx.resolve(ident) {
-                    Ref::Label(value) => self.emit(Move(AM::Global(value), AM::Register(r))),
-                    Ref::Stack(offset) => {
-                        self.emit(Move(AM::BaseRelative(RBP, value), AM::Register(r)))
-                    }
+                match self.ctx.resolve(&ident) {
+                    Ref::Label(value) => self.emit(Move(AM::Global(value.0), AM::Register(r))),
+                    Ref::Stack(offset) => self.emit(Move(
+                        AM::BaseRelative {
+                            register: RBP,
+                            offset,
+                        },
+                        AM::Register(r),
+                    )),
                 }
                 r
             }
@@ -180,8 +187,9 @@ impl Compiler {
         // setup arguments
         for (idx, p) in parameters.into_iter().enumerate() {
             if let Some(r) = self.arg_registers().get(idx as usize) {
+                let offset = (idx + 1) * 8;
                 self.emit(Push(*r));
-                self.ctx.define_stack(p, idx);
+                self.ctx.define_stack(p, offset);
             } else {
                 panic!("stack arguments not handled yet");
             }
@@ -350,7 +358,7 @@ impl Compiler {
         self.generating_functions.pop().expect("No function to pop");
     }
 
-    fn declare_data(&mut self, label: String) {
+    fn declare_data(&mut self, label: instructions::Label) {
         self.globals.insert(label, 0);
     }
 
