@@ -172,6 +172,7 @@ impl Compiler {
             self.free_scratch(r);
         }
 
+        // stack must be 16-byte aligned before call instruction
         if stack_args.len() % 2 != 0 {
             self.emit(Add(AM::Immediate(8), RSP));
         }
