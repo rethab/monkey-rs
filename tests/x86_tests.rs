@@ -179,7 +179,7 @@ mod test {
     }
 
     #[test]
-    fn test_function_arguments() {
+    fn test_function_arguments_in_registers() {
         assert_eq!(run_to_int("fn(a) { a }(5)"), 5);
         assert_eq!(run_to_int("fn(a) { a }(5 + 5)"), 10);
         assert_eq!(run_to_int("fn(a) { a + a }(5)"), 10);
@@ -217,10 +217,61 @@ mod test {
             run_to_int(
                 "
                     let five = fn(a, b, c, d, e) { (a + b) * c / d - e };
-                    four(2, 5, 4, 2, 4)
+                    five(2, 5, 4, 2, 4)
                 "
             ),
             10
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let six = fn(a, b, c, d, e, f) { (a + b) * c / d - e * f };
+                    six(2, 5, 4, 2, 4, 6)
+                "
+            ),
+            -10
+        );
+    }
+
+    #[test]
+    fn test_function_arguments_on_stack() {
+        assert_eq!(
+            run_to_int(
+                "
+                    let seven = fn(a, b, c, d, e, f, g) { (a + b) * c / d - e * f + g };
+                    seven(2, 5, 4, 2, 4, 6, 10)
+                "
+            ),
+            0
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let eight = fn(a, b, c, d, e, f, g, h) { g / h};
+                    eight(0, 0, 0, 0, 0, 0, 6, 2)
+                "
+            ),
+            3
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let nine = fn(a, b, c, d, e, f, g, h, i) { h / i};
+                    nine(0, 0, 0, 0, 0, 0, 0, 6, 2)
+                "
+            ),
+            3
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let nine = fn(a, b, c, d, e, f, g, h, i) {
+                        h / g * i - f
+                    };
+                    nine(0, 0, 0, 0, 0, 0, 1, 2, 3)
+                "
+            ),
+            6
         );
     }
 

@@ -9,7 +9,7 @@ pub struct Context(Inner);
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ref {
     Label(Label),
-    Stack(usize),
+    Stack(i32),
 }
 
 struct Inner {
@@ -34,7 +34,7 @@ impl Context {
         self.0.values.insert(ident.value, Ref::Label(lbl));
     }
 
-    pub fn define_stack(&mut self, ident: Identifier, offset: usize) {
+    pub fn define_stack(&mut self, ident: Identifier, offset: i32) {
         if self.0.parent.is_none() {
             panic!("Cannot define stack in root");
         }
@@ -167,7 +167,7 @@ mod tests {
         Ref::Label(Label(name.to_owned()))
     }
 
-    fn ref_stack(x: usize) -> Ref {
+    fn ref_stack(x: i32) -> Ref {
         Ref::Stack(x)
     }
 

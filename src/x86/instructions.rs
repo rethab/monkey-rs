@@ -3,7 +3,7 @@ use std::fmt;
 #[derive(Clone, Debug)]
 pub enum Instruction {
     Move(AddressingMode, AddressingMode),
-    Add(Register, Register),
+    Add(AddressingMode, Register),
     Sub(Register, Register),
     Mul(Register),
     Div(Register),
@@ -33,7 +33,7 @@ pub enum AddressingMode {
     Immediate(i32),
     Register(Register),
     Indirect(Register),
-    BaseRelative { register: Register, offset: usize },
+    BaseRelative { register: Register, offset: i32 },
 }
 
 pub const TRUE: i32 = -1;
@@ -58,6 +58,25 @@ pub enum Register {
     R13,
     R14,
     R15,
+}
+
+// system v abi: the first four arguments go into these registers.
+// for subsequent args, the stack is used
+const ARG_REGISTERS: &[Register] = &[
+    Register::RDI,
+    Register::RSI,
+    Register::RDX,
+    Register::RCX,
+    Register::R8,
+    Register::R9,
+];
+
+pub fn arg_register(idx: usize) -> Option<Register> {
+    if idx < ARG_REGISTERS.len() {
+        Some(ARG_REGISTERS[idx])
+    } else {
+        None
+    }
 }
 
 impl fmt::Display for Instruction {
@@ -95,7 +114,7 @@ impl fmt::Display for AddressingMode {
             Indirect(r) => write!(f, "({})", r),
             BaseRelative { register, offset } => {
                 if *offset != 0 {
-                    write!(f, "-{}", offset)?;
+                    write!(f, "{}", offset)?;
                 }
                 write!(f, "({})", register)
             }

@@ -139,7 +139,7 @@ impl Compiler {
 
     fn compile_call(
         &mut self,
-        arguments: Vec<ast::Expression>,
+        mut arguments: Vec<ast::Expression>,
         function: ast::Function,
     ) -> Register {
         let label = match function {
@@ -155,13 +155,31 @@ impl Compiler {
             } => self.compile_function_literal(parameters, *body),
         };
 
-        for (idx, arg) in arguments.into_iter().enumerate() {
+        // first 6 go into registers, rest on stack
+        let (reg_args, mut stack_args) = if arguments.len() > 6 {
+            let stack = arguments.split_off(6);
+            (arguments, stack)
+        } else {
+            (arguments, vec![])
+        };
+
+        for (idx, arg) in reg_args.into_iter().enumerate() {
             let r = self.compile_expression(arg);
-            let arg_r = *self
-                .arg_registers()
-                .get(idx)
-                .unwrap_or_else(|| panic!("stack arguments not supported yet"));
-            self.emit(Move(AM::Register(r), AM::Register(arg_r)));
+            match arg_register(idx) {
+                Some(arg_r) => self.emit(Move(AM::Register(r), AM::Register(arg_r))),
+                None => unreachable!("Stack args are split off above"),
+            };
+            self.free_scratch(r);
+        }
+
+        if stack_args.len() % 2 != 0 {
+            self.emit(Add(AM::Immediate(8), RSP));
+        }
+
+        stack_args.reverse();
+        for arg in stack_args {
+            let r = self.compile_expression(arg);
+            self.emit(Push(r));
             self.free_scratch(r);
         }
 
@@ -186,12 +204,15 @@ impl Compiler {
 
         // setup arguments
         for (idx, p) in parameters.into_iter().enumerate() {
-            if let Some(r) = self.arg_registers().get(idx as usize) {
+            if let Some(r) = arg_register(idx as usize) {
+                // register-passed arguments
                 let offset = (idx + 1) * 8;
-                self.emit(Push(*r));
-                self.ctx.define_stack(p, offset);
+                self.emit(Push(r));
+                self.ctx.define_stack(p, -(offset as i32));
             } else {
-                panic!("stack arguments not handled yet");
+                // stack-passed arguments are above the base pointer
+                let offset = ((idx as i32) - 4) * 8;
+                self.ctx.define_stack(p, offset);
             }
         }
 
@@ -218,7 +239,7 @@ impl Compiler {
     fn compile_infix(&mut self, op: &str, l: Register, r: Register) -> Register {
         match op {
             "+" => {
-                self.emit(Add(l, r));
+                self.emit(Add(AM::Register(l), r));
                 self.free_scratch(l);
                 r
             }
@@ -385,11 +406,6 @@ impl Compiler {
         } else {
             panic!("Register {} not found in scratch_register!", r);
         }
-    }
-
-    fn arg_registers(&self) -> Vec<Register> {
-        // todo could be constant?
-        vec![RDI, RSI, RDX, RCX]
     }
 
     fn create_label(&mut self) -> instructions::Label {
