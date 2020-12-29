@@ -9,6 +9,7 @@ pub struct Context(Inner);
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ref {
     Global(Label),
+    Function(Label),
     Local(u8),
     Stack(i32),
 }
@@ -49,8 +50,8 @@ impl Context {
         r
     }
 
-    pub fn define_global(&mut self, ident: Identifier, label: Label) {
-        self.0.values.insert(ident.value, Ref::Global(label));
+    pub fn define_function(&mut self, ident: Identifier, label: Label) {
+        self.0.values.insert(ident.value, Ref::Function(label));
     }
 
     pub fn define_stack(&mut self, ident: Identifier, offset: i32) {
@@ -90,7 +91,7 @@ impl Context {
             Inner {
                 parent: None,
                 values: HashMap::new(),
-                n_params, // after arguments, where locals start
+                n_params,
             },
         );
         self.0.parent = Some(Box::new(parent));
@@ -152,14 +153,14 @@ mod tests {
     }
 
     #[test]
-    fn define_global() {
+    fn define_function() {
         let mut ctx = Context::default();
 
-        ctx.define_global(ident("a"), Label("l1".to_owned()));
-        assert_eq!(ctx.resolve(&ident("a")), ref_global("l1"));
+        ctx.define_function(ident("a"), Label("l1".to_owned()));
+        assert_eq!(ctx.resolve(&ident("a")), ref_function("l1"));
 
-        ctx.define_global(ident("b"), Label("l2".to_owned()));
-        assert_eq!(ctx.resolve(&ident("b")), ref_global("l2"));
+        ctx.define_function(ident("b"), Label("l2".to_owned()));
+        assert_eq!(ctx.resolve(&ident("b")), ref_function("l2"));
     }
 
     #[test]
@@ -301,6 +302,10 @@ mod tests {
 
     fn ref_global(name: &str) -> Ref {
         Ref::Global(Label(name.to_owned()))
+    }
+
+    fn ref_function(name: &str) -> Ref {
+        Ref::Function(Label(name.to_owned()))
     }
 
     fn ref_local(idx: u8) -> Ref {

@@ -33,8 +33,8 @@ impl Compiler {
         self.emit(Move(AM::Register(RAX), AM::Register(RSI)));
         self.emit(Move(AM::Global("$.LC0".to_owned()), AM::Register(RDI)));
         self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
-        let label = instructions::Label("printf".to_owned());
-        self.emit_function_call(vec![], label);
+        let target = AM::Global("printf".to_owned());
+        self.emit_function_call(vec![], target);
     }
 
     fn compile_statements(&mut self, statements: Vec<ast::Statement>) -> Option<Register> {
@@ -63,7 +63,7 @@ impl Compiler {
                 } = *expression
                 {
                     let label = self.compile_function_literal(parameters, *body);
-                    self.ctx.define_global(name, label);
+                    self.ctx.define_function(name, label);
                 } else {
                     let r = self.compile_expression(*expression);
                     match self.ctx.define(name.clone()) {
@@ -75,8 +75,8 @@ impl Compiler {
                             let target = self.local_arg(idx);
                             self.emit(Move(AM::Register(r), target));
                         }
-                        Ref::Stack(_) => {
-                            unreachable!("Stack is for arguments, not for let bindings")
+                        Ref::Function(_) | Ref::Stack(_) => {
+                            unreachable!()
                         }
                     }
                     self.free_scratch(r);
@@ -120,7 +120,8 @@ impl Compiler {
             Identifier(ident) => {
                 let r = self.alloc_scratch();
                 match self.ctx.resolve(&ident) {
-                    Ref::Global(value) => self.emit(Move(AM::Global(value.0), AM::Register(r))),
+                    Ref::Global(label) => self.emit(Move(AM::Global(label.0), AM::Register(r))),
+                    Ref::Function(label) => self.emit(Lea(AM::RipRelative(label), r)),
                     Ref::Local(idx) => {
                         // space on the stack for additional arguments
                         let source = self.local_arg(idx);
@@ -162,20 +163,34 @@ impl Compiler {
         arguments: Vec<ast::Expression>,
         function: ast::Function,
     ) -> Register {
-        let label = match function {
-            ast::Function::Identifier(ident) => {
-                if let Ref::Global(lbl) = self.ctx.resolve(&ident) {
-                    lbl
-                } else {
-                    panic!("Local functions are not handled yet");
+        let target = match function {
+            ast::Function::Identifier(ident) => match self.ctx.resolve(&ident) {
+                Ref::Global(lbl) => {
+                    let r = self.alloc_scratch();
+                    self.emit(Move(AM::Global(lbl.0), AM::Register(r)));
+                    AM::Register(r)
                 }
-            }
+                Ref::Function(lbl) => AM::Global(lbl.0),
+                _ => unreachable!(),
+            },
             ast::Function::Literal {
                 parameters, body, ..
-            } => self.compile_function_literal(parameters, *body),
+            } => {
+                let lbl = self.compile_function_literal(parameters, *body);
+                AM::Global(lbl.0)
+            }
         };
 
-        self.emit_function_call(arguments, label);
+        let func_reg = match target {
+            AM::Register(r) => Some(r),
+            _ => None,
+        };
+
+        self.emit_function_call(arguments, target);
+
+        if let Some(r) = func_reg {
+            self.free_scratch(r);
+        }
 
         let r = self.alloc_scratch();
         self.emit(Move(AM::Register(RAX), AM::Register(r)));
@@ -238,6 +253,8 @@ impl Compiler {
             self.emit_function_epilogue();
             self.emit(Ret);
         }
+
+        self.ensure_released_scratch_registers();
 
         self.ctx.leave_function();
         self.function_end();
@@ -371,11 +388,7 @@ impl Compiler {
         self.emitting_container().len()
     }
 
-    fn emit_function_call(
-        &mut self,
-        mut arguments: Vec<ast::Expression>,
-        label: instructions::Label,
-    ) {
+    fn emit_function_call(&mut self, mut arguments: Vec<ast::Expression>, target: AddressingMode) {
         // first 6 go into registers, rest on stack
         let (reg_args, mut stack_args) = if arguments.len() > 6 {
             let stack = arguments.split_off(6);
@@ -411,7 +424,7 @@ impl Compiler {
             self.free_scratch(r);
         }
 
-        self.emit(Call(label));
+        self.emit(Call(target));
 
         if align_stack {
             self.emit(Sub(AM::Immediate(8), RSP));
@@ -505,6 +518,14 @@ impl Compiler {
             *used = false;
         } else {
             panic!("Register {} not found in scratch_register!", r);
+        }
+    }
+
+    fn ensure_released_scratch_registers(&self) {
+        for (r, used) in self.scratch_registers.iter() {
+            if *used {
+                panic!("Register {} is not released", r);
+            }
         }
     }
 

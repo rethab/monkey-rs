@@ -3,6 +3,7 @@ use std::fmt;
 #[derive(Clone, Debug)]
 pub enum Instruction {
     Move(AddressingMode, AddressingMode),
+    Lea(AddressingMode, Register),
     Add(AddressingMode, Register),
     Sub(AddressingMode, Register),
     Mul(Register),
@@ -16,7 +17,7 @@ pub enum Instruction {
     Jg(Label),
     Push(Register),
     Pop(Register),
-    Call(Label),
+    Call(AddressingMode),
     Ret,
     Label(Label),
 }
@@ -34,6 +35,7 @@ pub enum AddressingMode {
     Register(Register),
     Indirect(Register),
     BaseRelative { register: Register, offset: i32 },
+    RipRelative(Label),
 }
 
 pub const TRUE: i32 = -1;
@@ -102,6 +104,7 @@ impl fmt::Display for Instruction {
         use Instruction::*;
         match self {
             Move(src, trg) => write!(f, "MOVQ {}, {}", src, trg),
+            Lea(src, trg) => write!(f, "LEA {}, {}", src, trg),
             Add(src, trg) => write!(f, "ADDQ {}, {}", src, trg),
             Sub(src, trg) => write!(f, "SUBQ {}, {}", src, trg),
             Mul(src) => write!(f, "IMULQ {}", src),
@@ -113,7 +116,7 @@ impl fmt::Display for Instruction {
             Jne(lbl) => write!(f, "JNE {}", lbl.0),
             Jl(lbl) => write!(f, "JL {}", lbl.0),
             Jg(lbl) => write!(f, "JG {}", lbl.0),
-            Call(lbl) => write!(f, "CALL {}", lbl.0),
+            Call(trg) => write!(f, "CALL {}", trg),
             Push(r) => write!(f, "PUSHQ {}", r),
             Pop(r) => write!(f, "POPQ {}", r),
             Ret => write!(f, "RET"),
@@ -130,6 +133,7 @@ impl fmt::Display for AddressingMode {
             Immediate(x) => write!(f, "${}", x),
             Register(r) => write!(f, "{}", r),
             Indirect(r) => write!(f, "({})", r),
+            RipRelative(lbl) => write!(f, "{}(%rip)", lbl),
             BaseRelative { register, offset } => {
                 if *offset != 0 {
                     write!(f, "{}", offset)?;

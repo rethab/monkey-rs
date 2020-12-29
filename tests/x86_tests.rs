@@ -132,6 +132,7 @@ mod test {
     #[test]
     fn test_return_statement() {
         assert_eq!(run_to_int("let a = fn() { return 5; }; a();"), 5);
+        assert_eq!(run_to_int("fn() { return 5; return 6; }()"), 5);
         assert_eq!(run_to_int("let a = fn() { return 5 + 10; }; a();"), 15);
         assert_eq!(
             run_to_int(
@@ -410,6 +411,52 @@ mod test {
             15
         );
     }
+
+    #[test]
+    fn test_function_returning_function() {
+        assert_eq!(
+            run_to_int(
+                "
+                let returnsOne = fn() { 1; };
+                let returnsOneReturner = fn() { returnsOne; };
+                let returnedOne = returnsOneReturner();
+                returnedOne();
+            "
+            ),
+            1
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                let returnsOneReturner = fn() {
+                    let returnsOne = fn() { 1; };
+                    returnsOne;
+                };
+                let returnedOne = returnsOneReturner();
+                returnedOne();
+            "
+            ),
+            1
+        );
+    }
+
+    // #[test]
+    // fn test_closures() {
+    //     assert_eq!(run_to_int("fn(a) { fn() { a }() }(1)"), 1);
+    //     assert_eq!(run_to_int("fn(a) { fn(b) { a + b }(2) }(1)"), 3);
+    //     assert_eq!(run_to_int("fn(a, b) { fn() { a + b }() }(1, 2)"), 3);
+    //     assert_eq!(run_to_int("fn(a, b) { b + fn() { a + b }() }(1, 2)"), 5);
+
+    //     assert_eq!(
+    //         run_to_int(
+    //             "
+    //       let doubler = fn(a) { fn() { a + a } }();
+    //       doubler(5)
+    //     "
+    //         ),
+    //         5
+    //     );
+    // }
 
     fn run_to_int(input: &str) -> i32 {
         let p = parse(input);
