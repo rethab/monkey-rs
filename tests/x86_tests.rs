@@ -176,6 +176,23 @@ mod test {
             ),
             4
         );
+        assert_eq!(
+            run_to_int(
+                "
+                let f = fn(a) {
+                    if (a < 5) { return a } else { return a + 1 }
+                };
+                let g = fn(a, b) {
+                    if (a < b) {
+                        return b;
+                    }
+                    f(a * b)
+                }
+                g(1, 5) + g(5, 2)
+                "
+            ),
+            16
+        );
     }
 
     #[test]
