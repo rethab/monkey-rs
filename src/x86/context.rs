@@ -50,9 +50,6 @@ impl Context {
     }
 
     pub fn define_global(&mut self, ident: Identifier, label: Label) {
-        if self.scope() != Scope::Global {
-            panic!("Can only define global label in global scope");
-        }
         self.0.values.insert(ident.value, Ref::Global(label));
     }
 

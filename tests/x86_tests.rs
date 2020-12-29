@@ -350,6 +350,50 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_nested_functions() {
+        assert_eq!(run_to_int("fn() { fn() { 5 } () }()"), 5);
+        assert_eq!(
+            run_to_int(
+                "fn() {
+                    let five = fn() { 5 };
+                    let six = fn() { 6 };
+                    five() + six()
+                }()
+                "
+            ),
+            11
+        );
+        assert_eq!(
+            run_to_int(
+                "fn(a) {
+                    let f = fn(a) { let b = a * 2; b };
+                    let g = fn(a, b) { f(a) * b };
+                    g(a, 4)
+                }(3)
+                "
+            ),
+            24
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                  let f = fn(a, b, c, d, e, f, g, h, i) {
+                      let j = fn(k, l, m, n, o, p, q, r, s) {
+                        let t = fn(u, v, w, x, y, z) {
+                            z * y + u
+                        };
+                        k + o * r - t(1, 0, 0, 0, 2, 3)
+                      };
+                      j(7, 0, 0, 0, 3, 0, 0, 2, 0) + a * f - i
+                  };
+                  f(3, 0, 0, 0, 0, 7, 0, 0, 5) - 7
+                "
+            ),
+            15
+        );
+    }
+
     fn run_to_int(input: &str) -> i32 {
         let p = parse(input);
         let mut c = Compiler::default();
