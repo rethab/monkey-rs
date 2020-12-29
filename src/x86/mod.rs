@@ -4,7 +4,7 @@ use std::collections::HashMap;
 mod context;
 mod instructions;
 
-use context::{Context, Ref};
+use context::{Context, Ref, Scope};
 use instructions::Instruction::Label;
 use instructions::{AddressingMode as AM, Instruction::*, Register::*, *};
 
@@ -28,6 +28,13 @@ impl Compiler {
         } else {
             self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
         }
+
+        // for testing, just print RAX
+        self.emit(Move(AM::Register(RAX), AM::Register(RSI)));
+        self.emit(Move(AM::Global("$.LC0".to_owned()), AM::Register(RDI)));
+        self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
+        let label = instructions::Label("printf".to_owned());
+        self.emit_function_call(vec![], label);
     }
 
     fn compile_statements(&mut self, statements: Vec<ast::Statement>) -> Option<Register> {
@@ -56,15 +63,23 @@ impl Compiler {
                 } = *expression
                 {
                     let label = self.compile_function_literal(parameters, *body);
-                    self.ctx.define(name, label);
+                    self.ctx.define_global(name, label);
                 } else {
                     let r = self.compile_expression(*expression);
-                    self.emit(Move(AM::Register(r), AM::Global(name.value.clone())));
+                    match self.ctx.define(name.clone()) {
+                        Ref::Global(label) => {
+                            self.emit(Move(AM::Register(r), AM::Global(name.value)));
+                            self.declare_data(label);
+                        }
+                        Ref::Local(idx) => {
+                            let target = self.local_arg(idx);
+                            self.emit(Move(AM::Register(r), target));
+                        }
+                        Ref::Stack(_) => {
+                            unreachable!("Stack is for arguments, not for let bindings")
+                        }
+                    }
                     self.free_scratch(r);
-
-                    let label = instructions::Label(name.clone().value);
-                    self.declare_data(label.clone());
-                    self.ctx.define(name, label);
                 }
                 None
             }
@@ -105,7 +120,12 @@ impl Compiler {
             Identifier(ident) => {
                 let r = self.alloc_scratch();
                 match self.ctx.resolve(&ident) {
-                    Ref::Label(value) => self.emit(Move(AM::Global(value.0), AM::Register(r))),
+                    Ref::Global(value) => self.emit(Move(AM::Global(value.0), AM::Register(r))),
+                    Ref::Local(idx) => {
+                        // space on the stack for additional arguments
+                        let source = self.local_arg(idx);
+                        self.emit(Move(source, AM::Register(r)));
+                    }
                     Ref::Stack(offset) => self.emit(Move(
                         AM::BaseRelative {
                             register: RBP,
@@ -139,15 +159,15 @@ impl Compiler {
 
     fn compile_call(
         &mut self,
-        mut arguments: Vec<ast::Expression>,
+        arguments: Vec<ast::Expression>,
         function: ast::Function,
     ) -> Register {
         let label = match function {
             ast::Function::Identifier(ident) => {
-                if let Ref::Label(lbl) = self.ctx.resolve(&ident) {
+                if let Ref::Global(lbl) = self.ctx.resolve(&ident) {
                     lbl
                 } else {
-                    panic!("Functions must resolve to label");
+                    panic!("Local functions are not handled yet");
                 }
             }
             ast::Function::Literal {
@@ -155,36 +175,8 @@ impl Compiler {
             } => self.compile_function_literal(parameters, *body),
         };
 
-        // first 6 go into registers, rest on stack
-        let (reg_args, mut stack_args) = if arguments.len() > 6 {
-            let stack = arguments.split_off(6);
-            (arguments, stack)
-        } else {
-            (arguments, vec![])
-        };
+        self.emit_function_call(arguments, label);
 
-        for (idx, arg) in reg_args.into_iter().enumerate() {
-            let r = self.compile_expression(arg);
-            match arg_register(idx) {
-                Some(arg_r) => self.emit(Move(AM::Register(r), AM::Register(arg_r))),
-                None => unreachable!("Stack args are split off above"),
-            };
-            self.free_scratch(r);
-        }
-
-        // stack must be 16-byte aligned before call instruction
-        if stack_args.len() % 2 != 0 {
-            self.emit(Add(AM::Immediate(8), RSP));
-        }
-
-        stack_args.reverse();
-        for arg in stack_args {
-            let r = self.compile_expression(arg);
-            self.emit(Push(r));
-            self.free_scratch(r);
-        }
-
-        self.emit(Call(label));
         let r = self.alloc_scratch();
         self.emit(Move(AM::Register(RAX), AM::Register(r)));
         r
@@ -197,7 +189,8 @@ impl Compiler {
     ) -> instructions::Label {
         let label = self.create_label();
         self.function_start(label.clone());
-        self.ctx.enter_function();
+
+        self.ctx.enter_function(parameters.len());
 
         // prologue
         self.emit(Push(RBP));
@@ -217,18 +210,32 @@ impl Compiler {
             }
         }
 
+        let before_body_idx = self.current_instruction_idx();
+
+        // save callee-saved registers
+        for r in CALLEE_SAVED_REGISTERS {
+            self.emit(Push(*r));
+        }
+
         // compile body
         let maybe_reg = self.compile_statement(body);
 
+        // reserve space for local variables
+        let definitions = self.ctx.local_definitions();
+        if definitions > 0 {
+            let offset = (definitions * 8) as i32;
+            self.emit_at_index(before_body_idx, Sub(AM::Immediate(offset), RSP));
+        }
+
         // setup epilogue if there was no return statement
         if !matches!(self.last_emitted(), Some(Ret)) {
-            self.emit_function_epilogue();
             if let Some(r) = maybe_reg {
                 self.emit(Move(AM::Register(r), AM::Register(RAX)));
                 self.free_scratch(r);
             } else {
                 self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
             }
+            self.emit_function_epilogue();
             self.emit(Ret);
         }
 
@@ -245,7 +252,7 @@ impl Compiler {
                 r
             }
             "-" => {
-                self.emit(Sub(r, l));
+                self.emit(Sub(AM::Register(r), l));
                 self.free_scratch(r);
                 l
             }
@@ -348,17 +355,109 @@ impl Compiler {
         result
     }
 
+    fn local_arg(&self, idx: u8) -> AddressingMode {
+        let offset = (self.ctx.n_params() + idx as usize + 1) * 8;
+        AddressingMode::BaseRelative {
+            register: RBP,
+            offset: -(offset as i32),
+        }
+    }
+
     fn last_emitted(&mut self) -> Option<&Instruction> {
         self.emitting_container().last()
     }
 
+    fn current_instruction_idx(&mut self) -> usize {
+        self.emitting_container().len()
+    }
+
+    fn emit_function_call(
+        &mut self,
+        mut arguments: Vec<ast::Expression>,
+        label: instructions::Label,
+    ) {
+        // first 6 go into registers, rest on stack
+        let (reg_args, mut stack_args) = if arguments.len() > 6 {
+            let stack = arguments.split_off(6);
+            (arguments, stack)
+        } else {
+            (arguments, vec![])
+        };
+
+        for (idx, arg) in reg_args.into_iter().enumerate() {
+            let r = self.compile_expression(arg);
+            match arg_register(idx) {
+                Some(arg_r) => self.emit(Move(AM::Register(r), AM::Register(arg_r))),
+                None => unreachable!("Stack args are split off above"),
+            };
+            self.free_scratch(r);
+        }
+
+        // save caller-saved registers
+        self.emit(Push(R10));
+        self.emit(Push(R11));
+
+        // n stack args will lead to another n pushes
+        let align_stack = self.must_align_stack(stack_args.len());
+
+        if align_stack {
+            self.emit(Add(AM::Immediate(8), RSP));
+        }
+
+        stack_args.reverse();
+        for arg in stack_args {
+            let r = self.compile_expression(arg);
+            self.emit(Push(r));
+            self.free_scratch(r);
+        }
+
+        self.emit(Call(label));
+
+        if align_stack {
+            self.emit(Sub(AM::Immediate(8), RSP));
+        }
+
+        self.emit(Pop(R11));
+        self.emit(Pop(R10));
+    }
+
+    // stack must be 16-byte (2x 64bit) aligned before calling function
+    fn must_align_stack(&mut self, n_stack_args: usize) -> bool {
+        let mut offset = 0;
+        if self.ctx.scope() == Scope::Global {
+            // for testing: the main function has 7 pushes to preseve registers,
+            // therefore whatever pushes we do additionally (when calling functions)
+            // needs to be added to an odd number in order to detect whether we
+            // need to align
+            offset = 1;
+        }
+
+        let prev_pushes = self
+            .emitting_container()
+            .iter()
+            .filter(|i| matches!(i, Push(_)))
+            .count();
+
+        let total_pushes = offset + n_stack_args + prev_pushes;
+        total_pushes % 2 != 0
+    }
+
     fn emit_function_epilogue(&mut self) {
+        let mut callee_saved = CALLEE_SAVED_REGISTERS.to_vec();
+        callee_saved.reverse();
+        for r in callee_saved {
+            self.emit(Pop(r));
+        }
         self.emit(Move(AM::Register(RBP), AM::Register(RSP)));
         self.emit(Pop(RBP));
     }
 
     fn emit(&mut self, instr: Instruction) {
         self.emitting_container().push(instr);
+    }
+
+    fn emit_at_index(&mut self, idx: usize, instr: Instruction) {
+        self.emitting_container().insert(idx, instr);
     }
 
     fn emitting_container(&mut self) -> &mut Vec<Instruction> {
@@ -432,15 +531,7 @@ impl Default for Compiler {
         Self {
             main_function: vec![],
             globals: HashMap::new(),
-            scratch_registers: vec![
-                (RBX, false),
-                (R10, false),
-                (R11, false),
-                (R12, false),
-                (R13, false),
-                (R14, false),
-                (R15, false),
-            ],
+            scratch_registers: SCRATCH_REGISTERS.iter().map(|r| (*r, false)).collect(),
             label_idx: 0,
             ctx: Context::default(),
             functions: HashMap::new(),

@@ -275,6 +275,81 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_local_let_statements() {
+        assert_eq!(run_to_int("let a = 6; fn() { let a = 5; a }()"), 5);
+        assert_eq!(
+            run_to_int(
+                "
+                    let a = 6;
+                    let f = fn() { let a = 5; a };
+                    f() + a
+                "
+            ),
+            11
+        );
+        assert_eq!(
+            run_to_int("let x = fn() { let a = 5; a }; let a = 6; x()"),
+            5
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                let a = 7;
+                let f = fn() { let a = 1; let b = 2; a + b };
+                let g = fn() { let a = 3; let b = 4; a + b };
+                a + f() + g()
+                "
+            ),
+            17
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                let a = 7;
+                let f = fn(b) { let a = 1; a + b };
+                let g = fn() { let a = 3; let b = 4; a + b };
+                f(2) + g()
+                "
+            ),
+            10
+        );
+        assert_eq!(run_to_int("fn() { let a = 5; a }()"), 5);
+        assert_eq!(run_to_int("fn() { let a = 5; a + a }()"), 10);
+        assert_eq!(run_to_int("fn() { let a = 5; let b = 6; b + a }()"), 11);
+        assert_eq!(run_to_int("fn() { let a = 5; let b = 6; a }()"), 5);
+        assert_eq!(run_to_int("fn() { let a = 5 + 6; a * 2 }()"), 22);
+        assert_eq!(run_to_int("let a = fn() { let b = 5; b }; a()"), 5);
+        assert_eq!(
+            run_to_int("fn() { let a = 5; let b = 6; let c = a + b; c + a + b}()"),
+            22
+        );
+        assert_eq!(
+            run_to_int(
+                "fn() {
+                let a = 5;
+                let b = 6;
+                let c = a + b;
+                let d = a + b + c;
+                d
+            }()"
+            ),
+            22
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let nine = fn(a, b, c, d, e, f, g, h, i) {
+                        let res = h / g * i - f;
+                        res * 2
+                    };
+                    nine(0, 0, 0, 0, 0, 0, 1, 2, 3)
+                "
+            ),
+            12
+        );
+    }
+
     fn run_to_int(input: &str) -> i32 {
         let p = parse(input);
         let mut c = Compiler::default();
@@ -323,9 +398,11 @@ mod test {
         let output = Command::new(executable)
             .output()
             .unwrap_or_else(|err| panic!("Failed to run executable {:?}: {:?}", executable, err));
-        let str = String::from_utf8_lossy(&output.stdout);
-        str.parse()
-            .unwrap_or_else(|_| panic!("Failed to parse '{}' as i32", str))
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        stdout
+            .parse()
+            .unwrap_or_else(|_| panic!("Failed to parse '{}' as i32: {}", stdout, stderr))
     }
 
     fn wrap_with_preamble_and_epilogue(c: Compiler) -> String {
@@ -359,13 +436,20 @@ mod test {
 main:
         PUSHQ   %rbp
         MOVQ    %rsp, %rbp
+        PUSHQ   %rbx
+        PUSHQ   %r12
+        PUSHQ   %r13
+        PUSHQ   %r14
+        PUSHQ   %r15
 ";
 
-    const EPILOGUE: &'static str = "        MOVQ    %rax, %rsi
-        MOVQ    $.LC0, %rdi
-        MOVQ    $0, %rax
-        CALL    printf         
-        LEAVE
+    const EPILOGUE: &'static str = "        POPQ    %r15
+        POPQ    %r14
+        POPQ    %r13
+        POPQ    %r12
+        POPQ    %rbx
+        MOVQ    %rbp, %rsp
+        POPQ    %rbp
         RET
 ";
 }

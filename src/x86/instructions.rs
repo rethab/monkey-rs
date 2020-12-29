@@ -4,7 +4,7 @@ use std::fmt;
 pub enum Instruction {
     Move(AddressingMode, AddressingMode),
     Add(AddressingMode, Register),
-    Sub(Register, Register),
+    Sub(AddressingMode, Register),
     Mul(Register),
     Div(Register),
     Xor(AddressingMode, AddressingMode),
@@ -69,6 +69,24 @@ const ARG_REGISTERS: &[Register] = &[
     Register::RCX,
     Register::R8,
     Register::R9,
+];
+
+pub const CALLEE_SAVED_REGISTERS: &[Register] = &[
+    Register::RBX,
+    Register::R12,
+    Register::R13,
+    Register::R14,
+    Register::R15,
+];
+
+pub const SCRATCH_REGISTERS: &[Register] = &[
+    Register::RBX,
+    Register::R10,
+    Register::R11,
+    Register::R12,
+    Register::R13,
+    Register::R14,
+    Register::R15,
 ];
 
 pub fn arg_register(idx: usize) -> Option<Register> {
