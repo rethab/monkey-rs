@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Instruction {
     Move(AddressingMode, AddressingMode),
     Lea(AddressingMode, Register),
@@ -27,7 +27,7 @@ pub struct Function(pub Vec<Instruction>);
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Label(pub String);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
 pub enum AddressingMode {
     Global(String),

@@ -459,8 +459,10 @@ mod test {
     #[test]
     fn test_strlen() {
         assert_eq!(run_to_int("strlen(\"\")"), 0);
+        assert_eq!(run_to_int("strlen(\" \")"), 1);
         assert_eq!(run_to_int("strlen(\"a\")"), 1);
         assert_eq!(run_to_int("strlen(\"abc\")"), 3);
+        assert_eq!(run_to_int("strlen(\"   \")"), 3);
         assert_eq!(run_to_int("strlen(\"a\") + strlen(\"a\")"), 2);
         assert_eq!(run_to_int("let f = \"abc\"; strlen(f)"), 3);
         assert_eq!(
@@ -479,6 +481,61 @@ mod test {
                 "
             ),
             8
+        );
+    }
+
+    #[test]
+    fn test_strconcat() {
+        assert_eq!(run_to_string("strconcat(\"\", \"\")"), "");
+        assert_eq!(run_to_string("strconcat(\"a\", \"\")"), "a");
+        assert_eq!(run_to_string("strconcat(\"\", \"a\")"), "a");
+        assert_eq!(run_to_string("strconcat(\"a\", \"a\")"), "aa");
+        assert_eq!(run_to_string("strconcat(\"a\", \"b\")"), "ab");
+        assert_eq!(run_to_string("strconcat(\"aa\", \"bb\")"), "aabb");
+        assert_eq!(
+            run_to_string("strconcat(\"hello, \", \"world\")"),
+            "hello, world"
+        );
+        assert_eq!(
+            run_to_string(
+                "
+                    let h = \"hello\";
+                    let w = \"world\";
+                    let tmp = strconcat(\", \", w);
+                    strconcat(h, tmp)
+                "
+            ),
+            "hello, world"
+        );
+        assert_eq!(
+            run_to_string("fn(a, b) { strconcat(a, b) }(\"a\", \"b\")"),
+            "ab"
+        );
+        assert_eq!(
+            run_to_string("strconcat(strconcat(\"b\", \"c\"), \"d\")"),
+            "bcd"
+        );
+        assert_eq!(
+            run_to_string("strconcat(\"a\", strconcat(\"b\", \"c\"))"),
+            "abc"
+        );
+        assert_eq!(
+            run_to_string("strconcat(strconcat(\"a\", \"b\"), strconcat(\"c\", \"d\"))"),
+            "abcd"
+        );
+        assert_eq!(
+            run_to_string(
+                "
+                    let h = \"hello\";
+                    let w = \"world\";
+                    strconcat(h, strconcat(\", \", w))
+                "
+            ),
+            "hello, world"
+        );
+        assert_eq!(
+            run_to_int("let a = strlen(strconcat(\"a\", \"abc\")); a"),
+            4
         );
     }
 

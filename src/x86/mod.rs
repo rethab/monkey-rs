@@ -5,6 +5,7 @@ mod builtins;
 mod context;
 mod instructions;
 
+use builtins::{builtin_strconcat, is_builtin};
 use context::{Context, Ref, Scope};
 use instructions::Instruction::Label;
 use instructions::{AddressingMode as AM, Instruction::*, Register::*, *};
@@ -68,7 +69,7 @@ impl Compiler {
                     parameters, body, ..
                 } = *expression
                 {
-                    let label = self.compile_function_literal(parameters, *body);
+                    let label = self.compile_function_literal(parameters, *body, None);
                     self.ctx.define_function(name, label);
                 } else {
                     let r = self.compile_expression(*expression);
@@ -81,7 +82,7 @@ impl Compiler {
                             let target = self.local_arg(idx);
                             self.emit(Move(AM::Register(r), target));
                         }
-                        Ref::Function(_) | Ref::Builtin(_) | Ref::Stack(_) => {
+                        Ref::Function(_) | Ref::Stack(_) => {
                             unreachable!()
                         }
                     }
@@ -147,7 +148,6 @@ impl Compiler {
                         },
                         AM::Register(r),
                     )),
-                    Ref::Builtin(_) => unreachable!(),
                 }
                 r
             }
@@ -167,7 +167,14 @@ impl Compiler {
                 function,
                 arguments,
                 ..
-            } => self.compile_call(arguments, function),
+            } => {
+                if let Some(name) = self.get_indirect_builtin(&function) {
+                    self.compile_indirect_call(arguments, &name)
+                } else {
+                    let target = self.resolve_function_address(function);
+                    self.compile_call(arguments, target)
+                }
+            }
             other => unimplemented!("compile_expression: {:?}", other),
         }
     }
@@ -175,49 +182,82 @@ impl Compiler {
     fn compile_call(
         &mut self,
         arguments: Vec<ast::Expression>,
-        function: ast::Function,
+        target: AddressingMode,
     ) -> Register {
-        let target = match function {
-            ast::Function::Identifier(ident) => match self.ctx.resolve(&ident) {
-                Ref::Global(lbl) => {
-                    let r = self.alloc_scratch();
-                    self.emit(Move(AM::Global(lbl.0), AM::Register(r)));
-                    AM::Register(r)
-                }
-                Ref::Function(lbl) => AM::Global(lbl.0),
-                Ref::Builtin(builtin) => AM::Global(builtin.name.to_owned()),
-                Ref::Local(_) | Ref::Stack(_) => unreachable!(),
-            },
-            ast::Function::Literal {
-                parameters, body, ..
-            } => {
-                let lbl = self.compile_function_literal(parameters, *body);
-                AM::Global(lbl.0)
-            }
-        };
+        self.emit_function_call(arguments, target.clone());
 
-        let func_reg = match target {
-            AM::Register(r) => Some(r),
-            _ => None,
-        };
-
-        self.emit_function_call(arguments, target);
-
-        if let Some(r) = func_reg {
+        if let AM::Register(r) = target {
             self.free_scratch(r);
-        }
+        };
 
         let r = self.alloc_scratch();
         self.emit(Move(AM::Register(RAX), AM::Register(r)));
         r
     }
 
+    fn resolve_function_address(&mut self, function: ast::Function) -> AddressingMode {
+        match function {
+            ast::Function::Identifier(ident) => {
+                if is_builtin(&ident) {
+                    return AM::Global(ident.value);
+                }
+                match self.ctx.resolve(&ident) {
+                    Ref::Global(lbl) => {
+                        let r = self.alloc_scratch();
+                        self.emit(Move(AM::Global(lbl.0), AM::Register(r)));
+                        AM::Register(r)
+                    }
+                    Ref::Function(lbl) => AM::Global(lbl.0),
+                    Ref::Local(_) | Ref::Stack(_) => unreachable!(),
+                }
+            }
+            ast::Function::Literal {
+                parameters, body, ..
+            } => {
+                let lbl = self.compile_function_literal(parameters, *body, None);
+                AM::Global(lbl.0)
+            }
+        }
+    }
+
+    fn get_indirect_builtin(&self, function: &ast::Function) -> Option<String> {
+        if let ast::Function::Identifier(ast::Identifier { value, .. }) = function {
+            if value == "strconcat" {
+                return Some(value.to_owned());
+            }
+        }
+        None
+    }
+
+    fn compile_indirect_call(&mut self, arguments: Vec<ast::Expression>, name: &str) -> Register {
+        let label = match name {
+            "strconcat" => {
+                let label = instructions::Label(name.to_owned());
+                if !self.functions.contains_key(&label) {
+                    if let ast::Function::Literal {
+                        parameters, body, ..
+                    } = builtin_strconcat()
+                    {
+                        self.compile_function_literal(parameters, *body, Some(label))
+                    } else {
+                        panic!("builtin must create function literal");
+                    }
+                } else {
+                    label
+                }
+            }
+            other => unreachable!("indirect call to {}", other),
+        };
+        self.compile_call(arguments, AM::Global(label.0))
+    }
+
     fn compile_function_literal(
         &mut self,
         parameters: Vec<ast::Identifier>,
         body: ast::Statement,
+        predefined_label: Option<instructions::Label>,
     ) -> instructions::Label {
-        let label = self.create_label();
+        let label = predefined_label.unwrap_or_else(|| self.create_label());
         self.function_start(label.clone());
 
         self.ctx.enter_function(parameters.len());
