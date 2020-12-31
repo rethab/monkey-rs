@@ -23,6 +23,7 @@ pub enum Scope {
 struct Inner {
     parent: Option<Box<Inner>>,
     values: HashMap<String, Ref>,
+    local_idx: usize,
     n_params: usize,
 }
 
@@ -43,7 +44,9 @@ impl Context {
         let r = if self.scope() == Scope::Global {
             Ref::Global(Label(ident.value.clone()))
         } else {
-            Ref::Local(self.0.values.len() as u8)
+            let idx = self.0.local_idx;
+            self.0.local_idx += 1;
+            Ref::Local(idx as u8)
         };
 
         self.0.values.insert(ident.value, r.clone());
@@ -91,6 +94,7 @@ impl Context {
             Inner {
                 parent: None,
                 values: HashMap::new(),
+                local_idx: 0,
                 n_params,
             },
         );
@@ -107,6 +111,7 @@ impl Default for Context {
         Self(Inner {
             parent: None,
             values: HashMap::new(),
+            local_idx: 0,
             n_params: 0,
         })
     }
@@ -141,6 +146,19 @@ mod tests {
         ctx.define(ident("d"));
         ctx.define(ident("e"));
         assert_eq!(ctx.resolve(&ident("e")), ref_local(1));
+    }
+
+    #[test]
+    fn stack_and_function_does_not_increase_local() {
+        let mut ctx = Context::default();
+        ctx.enter_function(0);
+
+        ctx.define(ident("a"));
+        ctx.define_stack(ident("b"), 3);
+        ctx.define_function(ident("c"), Label("foo".to_owned()));
+        ctx.define(ident("d"));
+        assert_eq!(ctx.resolve(&ident("a")), ref_local(0));
+        assert_eq!(ctx.resolve(&ident("d")), ref_local(1));
     }
 
     #[test]

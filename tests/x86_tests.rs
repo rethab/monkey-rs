@@ -264,14 +264,14 @@ mod test {
                     let two = 2;
                     let three = one + two;
                     let add = fn(b, c) { b + c };
-                    let four = add(three, two);
-                    four + add(one, two) + eleven + a
+                    let five = add(three, two);
+                    five + add(one, two) + eleven + a
                 };
                 
                 f(33) + eleven + 5
                 "
             ),
-            67
+            68
         );
     }
 
