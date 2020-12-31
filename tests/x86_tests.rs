@@ -254,6 +254,25 @@ mod test {
             run_to_int("let add = fn(a, b) { a + b }; add(1, add(2, 3))"),
             6
         );
+        assert_eq!(
+            run_to_int(
+                "
+                let eleven = 11;
+                let twelve = 12;
+                let f = fn(a) {
+                    let one = 1;
+                    let two = 2;
+                    let three = one + two;
+                    let add = fn(b, c) { b + c };
+                    let four = add(three, two);
+                    four + add(one, two) + eleven + a
+                };
+                
+                f(33) + eleven + 5
+                "
+            ),
+            67
+        );
     }
 
     #[test]
