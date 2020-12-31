@@ -249,6 +249,11 @@ mod test {
             ),
             -10
         );
+        assert_eq!(run_to_int("let inc = fn(a) { a + 1 }; inc(inc(inc(1)))"), 4);
+        assert_eq!(
+            run_to_int("let add = fn(a, b) { a + b }; add(1, add(2, 3))"),
+            6
+        );
     }
 
     #[test]

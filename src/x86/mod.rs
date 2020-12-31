@@ -38,6 +38,7 @@ impl Compiler {
 
         // for testing, just print RAX
         self.emit(Move(AM::Register(RAX), AM::Register(RSI)));
+        self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
         let fmt = instructions::Label(".LC0".to_owned());
         self.emit(Lea(AM::RipRelative(fmt), RDI));
         let target = AM::Global("printf".to_owned());
@@ -452,8 +453,16 @@ impl Compiler {
             (arguments, vec![])
         };
 
-        for (idx, arg) in reg_args.into_iter().enumerate() {
+        // we cannot directly move into the argument registers,
+        // because a call like `f(a, g(b))` would move a into %rdi and
+        // then b also into %rdi in order to call g
+        let mut regs = vec![];
+        for arg in reg_args {
             let r = self.compile_expression(arg);
+            regs.push(r);
+        }
+
+        for (idx, r) in regs.into_iter().enumerate() {
             match arg_register(idx) {
                 Some(arg_r) => self.emit(Move(AM::Register(r), AM::Register(arg_r))),
                 None => unreachable!("Stack args are split off above"),

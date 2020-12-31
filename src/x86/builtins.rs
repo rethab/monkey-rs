@@ -13,7 +13,7 @@ pub fn builtin_strconcat() -> ast::Function {
     let function = "
         fn(a, b) {
             let alen = strlen(a);
-            let blen = strlen(a);
+            let blen = strlen(b);
             let addr = malloc(alen + blen + 1);
             strcat(strcpy(addr, a), b);
             addr
