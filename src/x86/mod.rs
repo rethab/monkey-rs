@@ -10,7 +10,7 @@ use instructions::{AddressingMode as AM, Instruction::*, Register::*, *};
 
 pub struct Compiler {
     main_function: Vec<Instruction>,
-    pub globals: HashMap<instructions::Label, i32>,
+    pub globals: HashMap<instructions::Label, GlobalValue>,
     scratch_registers: Vec<(Register, bool)>,
     label_idx: u16,
     ctx: Context,
@@ -18,6 +18,11 @@ pub struct Compiler {
     // last one is the one we're currently code-generating for.
     // empty means we are in the main function
     generating_functions: Vec<instructions::Label>,
+}
+
+pub enum GlobalValue {
+    GlobalString(String),
+    GlobalInt(i32),
 }
 
 impl Compiler {
@@ -31,8 +36,8 @@ impl Compiler {
 
         // for testing, just print RAX
         self.emit(Move(AM::Register(RAX), AM::Register(RSI)));
-        self.emit(Move(AM::Global("$.LC0".to_owned()), AM::Register(RDI)));
-        self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
+        let fmt = instructions::Label(".LC0".to_owned());
+        self.emit(Lea(AM::RipRelative(fmt), RDI));
         let target = AM::Global("printf".to_owned());
         self.emit_function_call(vec![], target);
     }
@@ -69,7 +74,7 @@ impl Compiler {
                     match self.ctx.define(name.clone()) {
                         Ref::Global(label) => {
                             self.emit(Move(AM::Register(r), AM::Global(name.value)));
-                            self.declare_data(label);
+                            self.declare_data_int(label);
                         }
                         Ref::Local(idx) => {
                             let target = self.local_arg(idx);
@@ -115,6 +120,13 @@ impl Compiler {
                 let r = self.alloc_scratch();
                 let x = if value { TRUE } else { FALSE };
                 self.emit(Move(AM::Immediate(x), AM::Register(r)));
+                r
+            }
+            StringLiteral { value, .. } => {
+                let label = self.create_label();
+                self.declare_data_string(label.clone(), &value);
+                let r = self.alloc_scratch();
+                self.emit(Lea(AM::RipRelative(label), r));
                 r
             }
             Identifier(ident) => {
@@ -492,8 +504,13 @@ impl Compiler {
         self.generating_functions.pop().expect("No function to pop");
     }
 
-    fn declare_data(&mut self, label: instructions::Label) {
-        self.globals.insert(label, 0);
+    fn declare_data_int(&mut self, label: instructions::Label) {
+        self.globals.insert(label, GlobalValue::GlobalInt(0));
+    }
+
+    fn declare_data_string(&mut self, label: instructions::Label, v: &str) {
+        self.globals
+            .insert(label, GlobalValue::GlobalString(v.to_owned()));
     }
 
     fn alloc_scratch(&mut self) -> Register {

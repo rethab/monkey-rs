@@ -5,12 +5,12 @@ mod test {
     use monkey::ast;
     use monkey::lexer::Lexer;
     use monkey::parser::Parser;
-    use monkey::x86::Compiler;
+    use monkey::x86::{Compiler, GlobalValue};
     use std::fs::File;
     use std::io::prelude::*;
     use std::io::Read;
     use std::path::Path;
-    use std::process::Command;
+    use std::process::{Command, Output};
     use tempfile::{self, TempDir};
 
     const TRUE: i32 = -1;
@@ -440,43 +440,57 @@ mod test {
         );
     }
 
-    // #[test]
-    // fn test_closures() {
-    //     assert_eq!(run_to_int("fn(a) { fn() { a }() }(1)"), 1);
-    //     assert_eq!(run_to_int("fn(a) { fn(b) { a + b }(2) }(1)"), 3);
-    //     assert_eq!(run_to_int("fn(a, b) { fn() { a + b }() }(1, 2)"), 3);
-    //     assert_eq!(run_to_int("fn(a, b) { b + fn() { a + b }() }(1, 2)"), 5);
-
-    //     assert_eq!(
-    //         run_to_int(
-    //             "
-    //       let doubler = fn(a) { fn() { a + a } }();
-    //       doubler(5)
-    //     "
-    //         ),
-    //         5
-    //     );
-    // }
+    #[test]
+    fn test_strings() {
+        assert_eq!(run_to_string("\"a\""), "a");
+        assert_eq!(run_to_string("\"abc\""), "abc");
+        assert_eq!(run_to_string("let a = \"foo\"; a"), "foo");
+        assert_eq!(
+            run_to_string("let f = fn(a) { return a }; f(\"bar\")"),
+            "bar"
+        );
+        assert_eq!(run_to_string("let f = \"foo\"; let g = \"bar\"; f"), "foo");
+        assert_eq!(
+            run_to_string("let a = \"foo\"; if (true) { a } else { false }"),
+            "foo"
+        );
+    }
 
     fn run_to_int(input: &str) -> i32 {
-        let p = parse(input);
-        let mut c = Compiler::default();
-        c.compile(p);
-        run(c)
+        let c = compile(input);
+        let output = run(c, OutputType::Int);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        stdout
+            .parse()
+            .unwrap_or_else(|_| panic!("Failed to parse '{}' as i32: {}", stdout, stderr))
+    }
+
+    fn run_to_string(input: &str) -> String {
+        let c = compile(input);
+        let output = run(c, OutputType::String);
+        String::from_utf8_lossy(&output.stdout).to_string()
     }
 
     fn parse(input: &str) -> ast::Program {
         *Parser::new(Lexer::new(input)).parse_program().unwrap()
     }
 
+    fn compile(input: &str) -> Compiler {
+        let p = parse(input);
+        let mut c = Compiler::default();
+        c.compile(p);
+        c
+    }
+
     /** Runs a fragment of assembly code, which can have one
      *  result in rax. The value of that register is returned. */
-    fn run(c: Compiler) -> i32 {
+    fn run(c: Compiler, output: OutputType) -> Output {
         let dir = TempDir::new().expect("Failed to create tempdir");
         let source = dir.path().join("program.s");
         let executable = dir.path().join("program");
 
-        let entire_program = wrap_with_preamble_and_epilogue(c);
+        let entire_program = wrap_with_preamble_and_epilogue(c, output);
         println!("Program: {}", entire_program);
         write_to_temp_file(&source, &entire_program);
         assemble_and_link(&source, &executable);
@@ -502,23 +516,28 @@ mod test {
         }
     }
 
-    fn run_executable(executable: &Path) -> i32 {
-        let output = Command::new(executable)
+    fn run_executable(executable: &Path) -> Output {
+        Command::new(executable)
             .output()
-            .unwrap_or_else(|err| panic!("Failed to run executable {:?}: {:?}", executable, err));
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        stdout
-            .parse()
-            .unwrap_or_else(|_| panic!("Failed to parse '{}' as i32: {}", stdout, stderr))
+            .unwrap_or_else(|err| panic!("Failed to run executable {:?}: {:?}", executable, err))
     }
 
-    fn wrap_with_preamble_and_epilogue(c: Compiler) -> String {
+    fn wrap_with_preamble_and_epilogue(c: Compiler, output: OutputType) -> String {
         let mut result = String::new();
         result.push_str(".data\n");
-        result.push_str(".LC0:\n        .string \"%d\"\n");
+        match output {
+            OutputType::Int => result.push_str(".LC0:\n        .string \"%d\"\n"),
+            OutputType::String => result.push_str(".LC0:\n        .string \"%s\"\n"),
+        }
         for (label, value) in &c.globals {
-            result.push_str(&format!("{}:\n        .quad {}\n", label, value));
+            match value {
+                GlobalValue::GlobalInt(i) => {
+                    result.push_str(&format!("{}:\n        .quad {}\n", label, i))
+                }
+                GlobalValue::GlobalString(s) => {
+                    result.push_str(&format!("{}:\n        .asciz \"{}\"\n", label, s))
+                }
+            }
         }
         result.push_str(PREAMBLE);
         result.push_str(&format!("{}", c.main_function()));
@@ -536,6 +555,11 @@ mod test {
         f.read_to_string(&mut contents)
             .expect("Failed to read file to string");
         println!("Contents of {:?}:\n{}\n", path, contents);
+    }
+
+    enum OutputType {
+        Int,
+        String,
     }
 
     const PREAMBLE: &'static str = "
