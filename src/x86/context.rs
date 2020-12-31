@@ -1,3 +1,4 @@
+use super::builtins::{get_builtin, Builtin};
 use super::instructions::Label;
 use crate::ast::Identifier;
 
@@ -10,6 +11,7 @@ pub struct Context(Inner);
 pub enum Ref {
     Global(Label),
     Function(Label),
+    Builtin(Builtin<'static>),
     Local(u8),
     Stack(i32),
 }
@@ -32,7 +34,9 @@ impl Inner {
             if let Some(p) = self.parent.as_ref() {
                 (*p).resolve(ident)
             } else {
-                panic!("Identifier {} not found", ident.value)
+                get_builtin(ident)
+                    .map(Ref::Builtin)
+                    .unwrap_or_else(|| panic!("Identifier {} not found", ident.value))
             }
         })
     }

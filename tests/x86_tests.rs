@@ -456,6 +456,32 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_strlen() {
+        assert_eq!(run_to_int("strlen(\"\")"), 0);
+        assert_eq!(run_to_int("strlen(\"a\")"), 1);
+        assert_eq!(run_to_int("strlen(\"abc\")"), 3);
+        assert_eq!(run_to_int("strlen(\"a\") + strlen(\"a\")"), 2);
+        assert_eq!(run_to_int("let f = \"abc\"; strlen(f)"), 3);
+        assert_eq!(
+            run_to_string(
+                "
+                    let a = \"a\";
+                    if (strlen(a) > 0) { \"not empty\" } else {\"empty\" }
+                "
+            ),
+            "not empty"
+        );
+        assert_eq!(
+            run_to_int(
+                " let f = fn(str) { strlen(str) };
+                  f(\"foo\") + 1 + f(\"meow\")
+                "
+            ),
+            8
+        );
+    }
+
     fn run_to_int(input: &str) -> i32 {
         let c = compile(input);
         let output = run(c, OutputType::Int);

@@ -1,6 +1,7 @@
 use crate::ast;
 use std::collections::HashMap;
 
+mod builtins;
 mod context;
 mod instructions;
 
@@ -80,7 +81,7 @@ impl Compiler {
                             let target = self.local_arg(idx);
                             self.emit(Move(AM::Register(r), target));
                         }
-                        Ref::Function(_) | Ref::Stack(_) => {
+                        Ref::Function(_) | Ref::Builtin(_) | Ref::Stack(_) => {
                             unreachable!()
                         }
                     }
@@ -146,6 +147,7 @@ impl Compiler {
                         },
                         AM::Register(r),
                     )),
+                    Ref::Builtin(_) => unreachable!(),
                 }
                 r
             }
@@ -183,7 +185,8 @@ impl Compiler {
                     AM::Register(r)
                 }
                 Ref::Function(lbl) => AM::Global(lbl.0),
-                _ => unreachable!(),
+                Ref::Builtin(builtin) => AM::Global(builtin.name.to_owned()),
+                Ref::Local(_) | Ref::Stack(_) => unreachable!(),
             },
             ast::Function::Literal {
                 parameters, body, ..
