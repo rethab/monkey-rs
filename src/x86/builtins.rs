@@ -3,13 +3,10 @@ use crate::lexer;
 use crate::parser;
 
 pub fn is_builtin(ident: &ast::Identifier) -> bool {
-    match ident.value.as_ref() {
-        "strlen" => true,
-        "strcat" => true,
-        "strcpy" => true,
-        "malloc" => true,
-        _ => false,
-    }
+    matches!(
+        ident.value.as_ref(),
+        "strlen" | "strcat" | "strcpy" | "malloc"
+    )
 }
 
 pub fn builtin_strconcat() -> ast::Function {
