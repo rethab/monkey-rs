@@ -70,7 +70,12 @@ impl Compiler {
                     parameters, body, ..
                 } = *expression
                 {
-                    let label = self.compile_function_literal(parameters, *body, None);
+                    let label = self.compile_function_literal(
+                        Some(name.value.clone()),
+                        parameters,
+                        *body,
+                        None,
+                    );
                     self.ctx.define_function(name, label);
                 } else {
                     let r = self.compile_expression(*expression);
@@ -215,7 +220,7 @@ impl Compiler {
             ast::Function::Literal {
                 parameters, body, ..
             } => {
-                let lbl = self.compile_function_literal(parameters, *body, None);
+                let lbl = self.compile_function_literal(None, parameters, *body, None);
                 AM::Global(lbl.0)
             }
         }
@@ -236,10 +241,13 @@ impl Compiler {
                 let label = instructions::Label(name.to_owned());
                 if !self.functions.contains_key(&label) {
                     if let ast::Function::Literal {
-                        parameters, body, ..
+                        name,
+                        parameters,
+                        body,
+                        ..
                     } = builtin_strconcat()
                     {
-                        self.compile_function_literal(parameters, *body, Some(label))
+                        self.compile_function_literal(name, parameters, *body, Some(label))
                     } else {
                         panic!("builtin must create function literal");
                     }
@@ -254,6 +262,7 @@ impl Compiler {
 
     fn compile_function_literal(
         &mut self,
+        name: Option<String>,
         parameters: Vec<ast::Identifier>,
         body: ast::Statement,
         predefined_label: Option<instructions::Label>,
@@ -261,7 +270,8 @@ impl Compiler {
         let label = predefined_label.unwrap_or_else(|| self.create_label());
         self.function_start(label.clone());
 
-        self.ctx.enter_function(parameters.len());
+        let name_and_label = name.map(|n| (n, label.clone()));
+        self.ctx.enter_function(name_and_label, parameters.len());
 
         // prologue
         self.emit(Push(RBP));

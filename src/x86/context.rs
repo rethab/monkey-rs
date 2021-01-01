@@ -88,12 +88,16 @@ impl Context {
         self.0.resolve(ident)
     }
 
-    pub fn enter_function(&mut self, n_params: usize) {
+    pub fn enter_function(&mut self, name: Option<(String, Label)>, n_params: usize) {
+        let mut values = HashMap::new();
+        if let Some((name, label)) = name {
+            values.insert(name, Ref::Function(label));
+        }
         let parent = mem::replace(
             &mut self.0,
             Inner {
                 parent: None,
-                values: HashMap::new(),
+                values,
                 local_idx: 0,
                 n_params,
             },
@@ -127,22 +131,29 @@ mod tests {
         assert_eq!(ctx.define(ident("a")), ref_global("a"));
         assert_eq!(ctx.define(ident("b")), ref_global("b"));
 
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         assert_eq!(ctx.define(ident("a")), ref_local(0));
         assert_eq!(ctx.define(ident("b")), ref_local(1));
     }
 
     #[test]
+    fn resolve_current_function() {
+        let mut ctx = Context::default();
+        ctx.enter_function(Some(("fib".to_owned(), Label("l0".to_owned()))), 0);
+        assert_eq!(ctx.resolve(&ident("fib")), ref_function("l0"));
+    }
+
+    #[test]
     fn local_indices_increase_per_level() {
         let mut ctx = Context::default();
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
 
         ctx.define(ident("a"));
         ctx.define(ident("b"));
         ctx.define(ident("c"));
         assert_eq!(ctx.resolve(&ident("c")), ref_local(2));
 
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define(ident("d"));
         ctx.define(ident("e"));
         assert_eq!(ctx.resolve(&ident("e")), ref_local(1));
@@ -151,7 +162,7 @@ mod tests {
     #[test]
     fn stack_and_function_does_not_increase_local() {
         let mut ctx = Context::default();
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
 
         ctx.define(ident("a"));
         ctx.define_stack(ident("b"), 3);
@@ -185,16 +196,16 @@ mod tests {
     fn resolve_in_parent() {
         let mut ctx = Context::default();
         ctx.define(ident("a"));
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         assert_eq!(ctx.resolve(&ident("a")), ref_global("a"));
     }
 
     #[test]
     fn resolve_stack_in_parent() {
         let mut ctx = Context::default();
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define_stack(ident("b"), 33);
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         assert_eq!(ctx.resolve(&ident("b")), ref_stack(33));
     }
 
@@ -202,7 +213,7 @@ mod tests {
     fn resolve_with_precedence() {
         let mut ctx = Context::default();
         ctx.define(ident("a"));
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define(ident("a"));
         assert_eq!(ctx.resolve(&ident("a")), ref_local(0));
     }
@@ -210,9 +221,9 @@ mod tests {
     #[test]
     fn resolve_stack_with_precedence() {
         let mut ctx = Context::default();
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define_stack(ident("b"), 33);
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define_stack(ident("b"), 34);
         assert_eq!(ctx.resolve(&ident("b")), ref_stack(34));
     }
@@ -221,15 +232,15 @@ mod tests {
     fn resolve_with_precedence_in_parent() {
         let mut ctx = Context::default();
 
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define(ident("a"));
         ctx.define_stack(ident("b"), 33);
 
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define(ident("a"));
         ctx.define_stack(ident("b"), 34);
 
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         assert_eq!(ctx.resolve(&ident("b")), ref_stack(34));
     }
 
@@ -237,13 +248,13 @@ mod tests {
     fn n_params() {
         let mut ctx = Context::default();
 
-        ctx.enter_function(1);
+        ctx.enter_function(None, 1);
         assert_eq!(ctx.n_params(), 1);
 
-        ctx.enter_function(3);
+        ctx.enter_function(None, 3);
         assert_eq!(ctx.n_params(), 3);
 
-        ctx.enter_function(7);
+        ctx.enter_function(None, 7);
         assert_eq!(ctx.n_params(), 7);
 
         ctx.leave_function();
@@ -258,12 +269,12 @@ mod tests {
         let mut ctx = Context::default();
         ctx.define(ident("a"));
 
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define(ident("b"));
         ctx.define_stack(ident("c"), 33);
         assert_eq!(ctx.local_definitions(), 1);
 
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define(ident("d"));
         ctx.define(ident("e"));
         ctx.define_stack(ident("c"), 33);
@@ -278,10 +289,10 @@ mod tests {
         let mut ctx = Context::default();
         assert_eq!(ctx.scope(), Scope::Global);
 
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         assert_eq!(ctx.scope(), Scope::Local);
 
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         assert_eq!(ctx.scope(), Scope::Local);
 
         ctx.leave_function();
@@ -295,7 +306,7 @@ mod tests {
     #[should_panic]
     fn not_resolve_label_from_child() {
         let mut ctx = Context::default();
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define(ident("a"));
         ctx.leave_function();
         ctx.resolve(&ident("a"));
@@ -305,7 +316,7 @@ mod tests {
     #[should_panic]
     fn not_resolve_stack_from_child() {
         let mut ctx = Context::default();
-        ctx.enter_function(0);
+        ctx.enter_function(None, 0);
         ctx.define_stack(ident("a"), 33);
         ctx.leave_function();
         ctx.resolve(&ident("a"));

@@ -465,6 +465,54 @@ mod test {
     }
 
     #[test]
+    fn test_recursive_function() {
+        assert_eq!(
+            run_to_int(
+                "
+                    let counter = fn(a) {
+                        if (a < 1) { a } else { counter(a - 1) }
+                    };
+                    counter(5);
+                "
+            ),
+            0
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let fib = fn(a) {
+                        if (a < 2) { 1 } else { fib(a-1) + fib(a-2) }
+                    };
+                    fib(5);
+                "
+            ),
+            8
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let counter = fn(a) {
+                        if (a < 1) { a } else { counter(a - 1) }
+                    };
+                    counter(1000);
+                "
+            ),
+            0
+        );
+        assert_eq!(
+            run_to_int(
+                "
+                    let fib = fn(a) {
+                        if (a < 2) { 1 } else { fib(a-1) + fib(a-2) }
+                    };
+                    fib(35);
+                "
+            ),
+            14930352
+        );
+    }
+
+    #[test]
     fn test_strings() {
         assert_eq!(run_to_string("\"a\""), "a");
         assert_eq!(run_to_string("\"abc\""), "abc");
