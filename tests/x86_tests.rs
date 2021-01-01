@@ -510,6 +510,21 @@ mod test {
             ),
             14930352
         );
+        assert_eq!(
+            run_to_int(
+                "
+                    let fib = fn(a) {
+                        let go = fn(acc, n) {
+                            if (n < 2) { acc + 1 }
+                            else { go(go(acc, n-2), n-1)}
+                        };
+                        go(0, a)
+                    };
+                    fib(35);
+                "
+            ),
+            14930351
+        );
     }
 
     #[test]
