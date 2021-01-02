@@ -523,8 +523,41 @@ mod test {
                     fib(35);
                 "
             ),
-            14930351
+            14930352
         );
+    }
+
+    #[test]
+    fn test_codesize() {
+        let program = "
+          let fib = fn(a) {
+            if (a < 2) { 1 } else { fib(a-1) + fib(a-2) }
+          };
+          let n = 7;
+          let counter = fn(a) {
+            if (a < 1) { a } else { counter(a-1) }
+          };
+          let longer = fn(a, b) {
+              if (strlen(a) > strlen(b)) { a } else { b }
+          };
+
+          let bc = longer(\"a\", \"bc\");
+
+          strlen(bc) + counter(5) + fib(7) + n
+        ";
+
+        let compiler = compile(program);
+        let mut instruction_length = 0;
+
+        let main = compiler.main_function();
+        instruction_length += main.0.len();
+
+        for (_, instrs) in compiler.functions() {
+            instruction_length += instrs.0.len();
+        }
+
+        // track codesize to see improvements
+        assert_eq!(215, instruction_length);
     }
 
     #[test]
