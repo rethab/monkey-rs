@@ -91,6 +91,18 @@ impl Into<AddressingMode> for Register {
     }
 }
 
+impl Into<AddressingMode> for i32 {
+    fn into(self) -> AddressingMode {
+        AddressingMode::Immediate(self)
+    }
+}
+
+impl Into<AddressingMode> for Label {
+    fn into(self) -> AddressingMode {
+        AddressingMode::Global(self.0)
+    }
+}
+
 // system v abi: the first four arguments go into these registers.
 // for subsequent args, the stack is used
 const ARG_REGISTERS: &[Register] = &[

@@ -30,15 +30,15 @@ pub enum GlobalValue {
 impl Compiler {
     pub fn compile(&mut self, p: ast::Program) {
         if let Some(r) = self.compile_statements(p.0) {
-            self.emit(Move(r.into(), RAX.into()));
+            self.emit_move(r, RAX);
             self.free_scratch(r);
         } else {
-            self.emit(Move(AM::Immediate(0), RAX.into()));
+            self.emit_move(0, RAX);
         }
 
         // for testing, just print RAX
-        self.emit(Move(AM::Register(RAX), AM::Register(RSI)));
-        self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
+        self.emit_move(RAX, RSI);
+        self.emit_move(0, RAX);
         let fmt = instructions::Label(".LC0".to_owned());
         self.emit(Lea(AM::RipRelative(fmt), RDI));
         let target = AM::Global("printf".to_owned());
@@ -71,7 +71,7 @@ impl Compiler {
             }
             Return { value, .. } => {
                 let r = self.compile_expression(value);
-                self.emit(Move(AM::Register(r), AM::Register(RAX)));
+                self.emit_move(r, RAX);
                 self.emit_function_epilogue();
                 self.free_scratch(r);
                 self.emit(Instruction::Return);
@@ -100,7 +100,7 @@ impl Compiler {
                 }
                 Ref::Local(idx) => {
                     let target = self.local_arg(idx);
-                    self.emit(Move(AM::Immediate(value as i32), target));
+                    self.emit_move(value as i32, target);
                 }
                 Ref::Function(_) | Ref::Stack(_) => {
                     unreachable!()
@@ -114,7 +114,7 @@ impl Compiler {
                     }
                     Ref::Local(idx) => {
                         let target = self.local_arg(idx);
-                        self.emit(Move(AM::Immediate(int_value as i32), target));
+                        self.emit_move(int_value as i32, target);
                     }
                     Ref::Function(_) | Ref::Stack(_) => {
                         unreachable!()
@@ -127,7 +127,7 @@ impl Compiler {
                     self.declare_data_string(label2.clone(), &value);
                     let r = self.alloc_scratch();
                     self.emit(Lea(AM::RipRelative(label2), r));
-                    self.emit(Move(AM::Register(r), AM::Global(label.0.clone())));
+                    self.emit_move(r, label.clone());
                     self.declare_data_int(label);
                     self.free_scratch(r);
                 }
@@ -135,7 +135,7 @@ impl Compiler {
                     let label = self.create_label("lit");
                     self.declare_data_string(label.clone(), &value);
                     let target = self.local_arg(idx);
-                    self.emit(Move(AM::RipRelative(label), target));
+                    self.emit_move(AM::RipRelative(label), target);
                 }
                 Ref::Function(_) | Ref::Stack(_) => {
                     unreachable!()
@@ -145,12 +145,12 @@ impl Compiler {
                 let r = self.compile_expression(other);
                 match self.ctx.define(name.clone()) {
                     Ref::Global(label) => {
-                        self.emit(Move(AM::Register(r), AM::Global(name.value)));
+                        self.emit_move(r, AM::Global(name.value));
                         self.declare_data_int(label);
                     }
                     Ref::Local(idx) => {
                         let target = self.local_arg(idx);
-                        self.emit(Move(AM::Register(r), target));
+                        self.emit_move(r, target);
                     }
                     Ref::Function(_) | Ref::Stack(_) => {
                         unreachable!()
@@ -188,13 +188,13 @@ impl Compiler {
             }
             IntLiteral { value, .. } => {
                 let r = self.alloc_scratch();
-                self.emit(Move(AM::Immediate(value as i32), AM::Register(r)));
+                self.emit_move(value as i32, r);
                 r
             }
             BooleanLiteral { value, .. } => {
                 let r = self.alloc_scratch();
                 let x = if value { TRUE } else { FALSE };
-                self.emit(Move(AM::Immediate(x), AM::Register(r)));
+                self.emit_move(x, r);
                 r
             }
             StringLiteral { value, .. } => {
@@ -207,20 +207,20 @@ impl Compiler {
             Identifier(ident) => {
                 let r = self.alloc_scratch();
                 match self.ctx.resolve(&ident) {
-                    Ref::Global(label) => self.emit(Move(AM::Global(label.0), AM::Register(r))),
+                    Ref::Global(label) => self.emit_move(label, r),
                     Ref::Function(label) => self.emit(Lea(AM::RipRelative(label), r)),
                     Ref::Local(idx) => {
                         // space on the stack for additional arguments
                         let source = self.local_arg(idx);
-                        self.emit(Move(source, AM::Register(r)));
+                        self.emit_move(source, r);
                     }
-                    Ref::Stack(offset) => self.emit(Move(
+                    Ref::Stack(offset) => self.emit_move(
                         AM::BaseRelative {
                             register: RBP,
                             offset,
                         },
-                        AM::Register(r),
-                    )),
+                        r,
+                    ),
                 }
                 r
             }
@@ -233,7 +233,7 @@ impl Compiler {
                 .compile_condition(*condition, *consequence, alternative)
                 .unwrap_or_else(|| {
                     let r = self.alloc_scratch();
-                    self.emit(Move(AM::Immediate(0), AM::Register(r)));
+                    self.emit_move(0, r);
                     r
                 }),
             Call {
@@ -264,7 +264,7 @@ impl Compiler {
         };
 
         let r = self.alloc_scratch();
-        self.emit(Move(AM::Register(RAX), AM::Register(r)));
+        self.emit_move(RAX, r);
         r
     }
 
@@ -280,7 +280,7 @@ impl Compiler {
                         // by global data cannot be called directly. When first moved
                         // to register r, we can do `CALL r`
                         let r = self.alloc_scratch();
-                        self.emit(Move(AM::Global(lbl.0), AM::Register(r)));
+                        self.emit_move(lbl, r);
                         AM::Register(r)
                     }
                     Ref::Function(lbl) => AM::Global(lbl.0),
@@ -345,7 +345,7 @@ impl Compiler {
 
         // prologue
         self.emit(Push(RBP));
-        self.emit(Move(AM::Register(RSP), AM::Register(RBP)));
+        self.emit_move(RSP, RBP);
 
         // setup arguments
         for (idx, p) in parameters.into_iter().enumerate() {
@@ -381,10 +381,10 @@ impl Compiler {
         // setup epilogue if there was no return statement
         if !matches!(self.last_emitted(), Some(Return)) {
             if let Some(r) = maybe_reg {
-                self.emit(Move(AM::Register(r), AM::Register(RAX)));
+                self.emit_move(r, RAX);
                 self.free_scratch(r);
             } else {
-                self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
+                self.emit_move(0, RAX);
             }
             self.emit_function_epilogue();
             self.emit(Return);
@@ -402,7 +402,7 @@ impl Compiler {
             "+" => match (l, r) {
                 (AM::Immediate(l), AM::Immediate(r)) => {
                     let res = self.alloc_scratch();
-                    self.emit(Move(AM::Immediate(l + r), res.into()));
+                    self.emit_move(l + r, res);
                     res
                 }
                 (l, AM::Register(r)) => {
@@ -424,7 +424,7 @@ impl Compiler {
             "-" => match (l, r) {
                 (AM::Immediate(l), AM::Immediate(r)) => {
                     let res = self.alloc_scratch();
-                    self.emit(Move(AM::Immediate(l - r), res.into()));
+                    self.emit_move(l - r, res);
                     res
                 }
                 (AM::Register(l), r) => {
@@ -436,7 +436,7 @@ impl Compiler {
                 }
                 (l, AM::Register(r)) => {
                     let res = self.alloc_scratch();
-                    self.emit(Move(l, res.into()));
+                    self.emit_move(l, res);
                     self.emit(Sub(r.into(), res));
                     self.free_scratch(r);
                     res
@@ -446,25 +446,25 @@ impl Compiler {
             "*" => match (l, r) {
                 (AM::Immediate(l), AM::Immediate(r)) => {
                     let res = self.alloc_scratch();
-                    self.emit(Move(AM::Immediate(l * r), res.into()));
+                    self.emit_move(l * r, res);
                     res
                 }
                 (AM::Register(l), r) => {
-                    self.emit(Move(r.clone(), RAX.into()));
+                    self.emit_move(r.clone(), RAX);
                     self.emit(Mul(l));
                     if let AM::Register(r) = r {
                         self.free_scratch(r);
                     }
-                    self.emit(Move(RAX.into(), l.into()));
+                    self.emit_move(RAX, l);
                     l
                 }
                 (l, AM::Register(r)) => {
-                    self.emit(Move(l.clone(), RAX.into()));
+                    self.emit_move(l.clone(), RAX);
                     self.emit(Mul(r));
                     if let AM::Register(l) = l {
                         self.free_scratch(l);
                     }
-                    self.emit(Move(RAX.into(), r.into()));
+                    self.emit_move(RAX, r);
                     r
                 }
                 other => panic!("Either side of * must be a register: {:?}", other),
@@ -472,16 +472,16 @@ impl Compiler {
             "/" => match (l, r) {
                 (AM::Immediate(l), AM::Immediate(r)) => {
                     let res = self.alloc_scratch();
-                    self.emit(Move(AM::Immediate(l / r), res.into()));
+                    self.emit_move(l / r, res);
                     res
                 }
                 (l, r) => {
-                    self.emit(Move(AM::Immediate(0), AM::Register(RDX)));
+                    self.emit_move(0, RDX);
 
                     if let AM::Immediate(l) = l {
-                        self.emit(Move(AM::Immediate(l), RAX.into()));
+                        self.emit_move(l, RAX);
                     } else {
-                        self.emit(Move(l.clone(), RAX.into()));
+                        self.emit_move(l.clone(), RAX);
                         if let AM::Register(l) = l {
                             self.free_scratch(l);
                         }
@@ -489,7 +489,7 @@ impl Compiler {
 
                     let r = if let AM::Immediate(i) = r {
                         let r = self.alloc_scratch();
-                        self.emit(Move(AM::Immediate(i), r.into()));
+                        self.emit_move(i, r);
                         r.into()
                     } else {
                         r
@@ -500,20 +500,20 @@ impl Compiler {
                     match (l, r) {
                         (AM::Register(l), AM::Register(r)) => {
                             self.free_scratch(l);
-                            self.emit(Move(RAX.into(), r.into()));
+                            self.emit_move(RAX, r);
                             r
                         }
                         (_, AM::Register(r)) => {
-                            self.emit(Move(RAX.into(), r.into()));
+                            self.emit_move(RAX, r);
                             r
                         }
                         (AM::Register(l), _) => {
-                            self.emit(Move(RAX.into(), l.into()));
+                            self.emit_move(RAX, l);
                             l
                         }
                         (_, _) => {
                             let res = self.alloc_scratch();
-                            self.emit(Move(RAX.into(), res.into()));
+                            self.emit_move(RAX, res);
                             res
                         }
                     }
@@ -538,9 +538,9 @@ impl Compiler {
                 _ => unreachable!(op),
             };
             if truth {
-                self.emit(Move(AM::Immediate(TRUE), AM::Register(res)));
+                self.emit_move(TRUE, res);
             } else {
-                self.emit(Move(AM::Immediate(FALSE), AM::Register(res)));
+                self.emit_move(FALSE, res);
             }
         } else {
             if let AM::Immediate(l) = l {
@@ -550,10 +550,10 @@ impl Compiler {
                 self.emit(Compare(r.clone(), l.clone()));
                 self.emit(Instruction::jump_for_op(op, false_label.clone()));
             }
-            self.emit(Move(AM::Immediate(TRUE), AM::Register(res)));
+            self.emit_move(TRUE, res);
             self.emit(Jump(after_label.clone()));
             self.emit(Label(false_label));
-            self.emit(Move(AM::Immediate(FALSE), AM::Register(res)));
+            self.emit_move(FALSE, res);
             self.emit(Label(after_label));
         }
 
@@ -611,7 +611,7 @@ impl Compiler {
         let maybe_cr = self.compile_statement(consequence);
         if let Some(cr) = maybe_cr {
             let r = self.alloc_scratch();
-            self.emit(Move(AM::Register(cr), AM::Register(r)));
+            self.emit_move(cr, r);
             self.free_scratch(cr);
             result = Some(r);
         }
@@ -626,7 +626,7 @@ impl Compiler {
                     result = Some(tmp);
                     tmp
                 });
-                self.emit(Move(AM::Register(ar), AM::Register(r)));
+                self.emit_move(ar, r);
                 self.free_scratch(ar);
             }
         }
@@ -670,7 +670,7 @@ impl Compiler {
 
         for (idx, r) in regs.into_iter().enumerate() {
             match arg_register(idx) {
-                Some(arg_r) => self.emit(Move(AM::Register(r), AM::Register(arg_r))),
+                Some(arg_r) => self.emit_move(r, arg_r),
                 None => unreachable!("Stack args are split off above"),
             };
             self.free_scratch(r);
@@ -731,12 +731,16 @@ impl Compiler {
         for r in callee_saved {
             self.emit(Pop(r));
         }
-        self.emit(Move(AM::Register(RBP), AM::Register(RSP)));
+        self.emit_move(RBP, RSP);
         self.emit(Pop(RBP));
     }
 
     fn emit(&mut self, instr: Instruction) {
         self.emitting_container().push(instr);
+    }
+
+    fn emit_move<S: Into<AddressingMode>, T: Into<AddressingMode>>(&mut self, src: S, trg: T) {
+        self.emit(Move(src.into(), trg.into()))
     }
 
     fn emit_at_index(&mut self, idx: usize, instr: Instruction) {
