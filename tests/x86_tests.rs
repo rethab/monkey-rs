@@ -67,6 +67,8 @@ mod test {
 
     #[test]
     fn test_if_expressions() {
+        assert_eq!(run_to_int("if (true) { 3 }"), 3);
+        assert_eq!(run_to_int("if (false) { 4 } else { 3 } "), 3);
         assert_eq!(run_to_int("if (1 < 2) { 3 }"), 3);
         assert_eq!(run_to_int("if (1 < 2) { 3 } else { 4 }"), 3);
         assert_eq!(run_to_int("if (2 < 2) { 3 } else { 4 }"), 4);
@@ -87,7 +89,15 @@ mod test {
             run_to_int("if (if(false){10}else{false}) {10} else {20}"),
             20
         );
-        assert_eq!(run_to_int("if (3 < 2) { 3 }"), 0);
+        assert_eq!(
+            run_to_int("let isTwo = fn(a) { a == 2 }; if (isTwo(3)) { 4 } else { 5 }"),
+            5
+        );
+        assert_eq!(
+            run_to_int("let cond = 3 < 4; if (cond) { 4 } else { 5 }"),
+            4
+        );
+        assert_eq!(run_to_int("if ((3<4)==false) { 3 } else { 5 }"), 5);
     }
 
     #[test]
@@ -557,7 +567,7 @@ mod test {
         }
 
         // track codesize to see improvements
-        assert_eq!(215, instruction_length);
+        assert_eq!(194, instruction_length);
     }
 
     #[test]

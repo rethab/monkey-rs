@@ -131,7 +131,7 @@ impl Compiler {
                 r
             }
             StringLiteral { value, .. } => {
-                let label = self.create_label();
+                let label = self.create_label("lit");
                 self.declare_data_string(label.clone(), &value);
                 let r = self.alloc_scratch();
                 self.emit(Lea(AM::RipRelative(label), r));
@@ -209,6 +209,7 @@ impl Compiler {
                 }
                 match self.ctx.resolve(&ident) {
                     Ref::Global(lbl) => {
+                        // TODO why not just return the global ref? why move to reg?
                         let r = self.alloc_scratch();
                         self.emit(Move(AM::Global(lbl.0), AM::Register(r)));
                         AM::Register(r)
@@ -267,7 +268,7 @@ impl Compiler {
         body: ast::Statement,
         predefined_label: Option<instructions::Label>,
     ) -> instructions::Label {
-        let label = predefined_label.unwrap_or_else(|| self.create_label());
+        let label = predefined_label.unwrap_or_else(|| self.create_label("fn"));
         self.function_start(label.clone());
 
         let name_and_label = name.map(|n| (n, label.clone()));
@@ -354,28 +355,32 @@ impl Compiler {
                 self.free_scratch(r);
                 l
             }
-            "<" | ">" | "==" | "!=" => {
-                self.emit(Compare(AM::Register(r), AM::Register(l)));
-                self.free_scratch(l);
-
-                let true_label = self.create_label();
-                let after_label = self.create_label();
-
-                match op {
-                    "<" => self.emit(JumpLess(true_label.clone())),
-                    ">" => self.emit(JumpGreater(true_label.clone())),
-                    "==" => self.emit(JumpEqual(true_label.clone())),
-                    "!=" => self.emit(JumpNotEqual(true_label.clone())),
-                    _ => unreachable!(op),
-                };
-                self.emit(Move(AM::Immediate(FALSE), AM::Register(r)));
-                self.emit(Jump(after_label.clone()));
-                self.emit(Label(true_label));
-                self.emit(Move(AM::Immediate(TRUE), AM::Register(r)));
-                self.emit(Label(after_label));
-                r
-            }
+            "<" | ">" | "==" | "!=" => self.compile_infix_boolean(op, l, r),
             other => unimplemented!("infix {}", other),
+        }
+    }
+
+    fn compile_infix_boolean(&mut self, op: &str, l: Register, r: Register) -> Register {
+        let false_label = self.create_label("true");
+        let after_label = self.create_label("after");
+        self.emit(Compare(AM::Register(r), AM::Register(l)));
+        self.free_scratch(l);
+        self.emit(self.jump_for_op(op, false_label.clone()));
+        self.emit(Move(AM::Immediate(TRUE), AM::Register(r)));
+        self.emit(Jump(after_label.clone()));
+        self.emit(Label(false_label));
+        self.emit(Move(AM::Immediate(FALSE), AM::Register(r)));
+        self.emit(Label(after_label));
+        r
+    }
+
+    fn jump_for_op(&self, op: &str, false_label: instructions::Label) -> Instruction {
+        match op {
+            "<" => JumpGreaterEqual(false_label),
+            ">" => JumpLessEqual(false_label),
+            "==" => JumpNotEqual(false_label),
+            "!=" => JumpEqual(false_label),
+            _ => unreachable!(op),
         }
     }
 
@@ -395,22 +400,30 @@ impl Compiler {
         consequence: ast::Statement,
         alternative: Option<Box<ast::Statement>>,
     ) -> Option<Register> {
-        let done_label = self.create_label();
-        let er = self.compile_expression(condition);
-        self.emit(Compare(AM::Immediate(FALSE), AM::Register(er)));
-        self.free_scratch(er);
+        let done_label = self.create_label("done");
+        let false_label = if alternative.is_some() {
+            self.create_label("false")
+        } else {
+            done_label.clone()
+        };
+
+        if let ast::Expression::Infix { op, lhs, rhs, .. } = condition {
+            let l = self.compile_expression(*lhs);
+            let r = self.compile_expression(*rhs);
+            self.emit(Compare(AM::Register(r), AM::Register(l)));
+
+            self.free_scratch(l);
+            self.free_scratch(r);
+            self.emit(self.jump_for_op(&op, false_label.clone()));
+        } else {
+            let er = self.compile_expression(condition);
+            self.emit(Compare(AM::Immediate(FALSE), AM::Register(er)));
+            self.free_scratch(er);
+            self.emit(JumpEqual(false_label.clone()));
+        };
 
         // could probably be optimized away
         let mut result = None;
-
-        let alt = if let Some(alt) = alternative {
-            let alt_label = self.create_label();
-            self.emit(JumpEqual(alt_label.clone()));
-            Some((alt_label, alt))
-        } else {
-            self.emit(JumpEqual(done_label.clone()));
-            None
-        };
 
         let maybe_cr = self.compile_statement(consequence);
         if let Some(cr) = maybe_cr {
@@ -420,9 +433,9 @@ impl Compiler {
             result = Some(r);
         }
 
-        if let Some((alt_label, alt)) = alt {
+        if let Some(alt) = alternative {
             self.emit(Jump(done_label.clone()));
-            self.emit(Label(alt_label));
+            self.emit(Label(false_label));
             let maybe_ar = self.compile_statement(*alt);
             if let Some(ar) = maybe_ar {
                 let r = result.unwrap_or_else(|| {
@@ -608,8 +621,8 @@ impl Compiler {
         }
     }
 
-    fn create_label(&mut self) -> instructions::Label {
-        let label = instructions::Label(format!("L{}", self.label_idx));
+    fn create_label(&mut self, suffix: &str) -> instructions::Label {
+        let label = instructions::Label(format!("L{}_{}", self.label_idx, suffix));
         self.label_idx += 1;
         label
     }
