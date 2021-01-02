@@ -66,34 +66,7 @@ impl Compiler {
             Let {
                 name, expression, ..
             } => {
-                if let ast::Expression::FunctionLiteral {
-                    parameters, body, ..
-                } = *expression
-                {
-                    let label = self.compile_function_literal(
-                        Some(name.value.clone()),
-                        parameters,
-                        *body,
-                        None,
-                    );
-                    self.ctx.define_function(name, label);
-                } else {
-                    let r = self.compile_expression(*expression);
-                    match self.ctx.define(name.clone()) {
-                        Ref::Global(label) => {
-                            self.emit(Move(AM::Register(r), AM::Global(name.value)));
-                            self.declare_data_int(label);
-                        }
-                        Ref::Local(idx) => {
-                            let target = self.local_arg(idx);
-                            self.emit(Move(AM::Register(r), target));
-                        }
-                        Ref::Function(_) | Ref::Stack(_) => {
-                            unreachable!()
-                        }
-                    }
-                    self.free_scratch(r);
-                }
+                self.compile_let(name, *expression);
                 None
             }
             Return { value, .. } => {
@@ -103,6 +76,87 @@ impl Compiler {
                 self.free_scratch(r);
                 self.emit(Instruction::Return);
                 None
+            }
+        }
+    }
+
+    fn compile_let(&mut self, name: ast::Identifier, expression: ast::Expression) {
+        use ast::Expression::*;
+        match expression {
+            FunctionLiteral {
+                parameters, body, ..
+            } => {
+                let label = self.compile_function_literal(
+                    Some(name.value.clone()),
+                    parameters,
+                    *body,
+                    None,
+                );
+                self.ctx.define_function(name, label);
+            }
+            IntLiteral { value, .. } => match self.ctx.define(name.clone()) {
+                Ref::Global(label) => {
+                    self.declare_data_int_value(label, value as i32);
+                }
+                Ref::Local(idx) => {
+                    let target = self.local_arg(idx);
+                    self.emit(Move(AM::Immediate(value as i32), target));
+                }
+                Ref::Function(_) | Ref::Stack(_) => {
+                    unreachable!()
+                }
+            },
+            BooleanLiteral { value, .. } => {
+                let int_value = if value { TRUE } else { FALSE };
+                match self.ctx.define(name.clone()) {
+                    Ref::Global(label) => {
+                        self.declare_data_int_value(label, int_value);
+                    }
+                    Ref::Local(idx) => {
+                        let target = self.local_arg(idx);
+                        self.emit(Move(AM::Immediate(int_value as i32), target));
+                    }
+                    Ref::Function(_) | Ref::Stack(_) => {
+                        unreachable!()
+                    }
+                }
+            }
+            StringLiteral { value, .. } => match self.ctx.define(name.clone()) {
+                Ref::Global(label) => {
+                    let label2 = self.create_label("lit");
+                    self.declare_data_string(label2.clone(), &value);
+                    let r = self.alloc_scratch();
+                    self.emit(Lea(AM::RipRelative(label2), r));
+                    self.emit(Move(AM::Register(r), AM::Global(label.0.clone())));
+                    self.declare_data_int(label);
+                    self.free_scratch(r);
+                }
+                Ref::Local(idx) => {
+                    let label = self.create_label("lit");
+                    self.declare_data_string(label.clone(), &value);
+                    let target = self.local_arg(idx);
+                    self.emit(Move(AM::RipRelative(label), target));
+                }
+                Ref::Function(_) | Ref::Stack(_) => {
+                    unreachable!()
+                }
+            },
+            other => {
+                let r = self.compile_expression(other);
+                match self.ctx.define(name.clone()) {
+                    Ref::Global(label) => {
+                        self.emit(Move(AM::Register(r), AM::Global(name.value)));
+                        self.declare_data_int(label);
+                    }
+                    Ref::Local(idx) => {
+                        let target = self.local_arg(idx);
+                        self.emit(Move(AM::Register(r), target));
+                    }
+                    Ref::Function(_) | Ref::Stack(_) => {
+                        unreachable!()
+                    }
+                }
+                self.free_scratch(r);
             }
         }
     }
@@ -707,7 +761,11 @@ impl Compiler {
     }
 
     fn declare_data_int(&mut self, label: instructions::Label) {
-        self.globals.insert(label, GlobalValue::GlobalInt(0));
+        self.declare_data_int_value(label, 0);
+    }
+
+    fn declare_data_int_value(&mut self, label: instructions::Label, v: i32) {
+        self.globals.insert(label, GlobalValue::GlobalInt(v));
     }
 
     fn declare_data_string(&mut self, label: instructions::Label, v: &str) {

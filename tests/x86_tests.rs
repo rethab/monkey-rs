@@ -577,6 +577,8 @@ mod test {
           strlen(bc) + counter(5) + fib(7) + n
         ";
 
+        assert_eq!(run_to_int(program), 30);
+
         let compiler = compile(program);
         let mut instruction_length = 0;
 
@@ -588,7 +590,7 @@ mod test {
         }
 
         // track codesize to see improvements
-        assert_eq!(191, instruction_length);
+        assert_eq!(189, instruction_length);
     }
 
     #[test]
