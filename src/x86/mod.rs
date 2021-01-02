@@ -101,7 +101,7 @@ impl Compiler {
                 self.emit(Move(AM::Register(r), AM::Register(RAX)));
                 self.emit_function_epilogue();
                 self.free_scratch(r);
-                self.emit(Ret);
+                self.emit(Instruction::Return);
                 None
             }
         }
@@ -309,7 +309,7 @@ impl Compiler {
         }
 
         // setup epilogue if there was no return statement
-        if !matches!(self.last_emitted(), Some(Ret)) {
+        if !matches!(self.last_emitted(), Some(Return)) {
             if let Some(r) = maybe_reg {
                 self.emit(Move(AM::Register(r), AM::Register(RAX)));
                 self.free_scratch(r);
@@ -317,7 +317,7 @@ impl Compiler {
                 self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
             }
             self.emit_function_epilogue();
-            self.emit(Ret);
+            self.emit(Return);
         }
 
         self.ensure_released_scratch_registers();
@@ -355,21 +355,21 @@ impl Compiler {
                 l
             }
             "<" | ">" | "==" | "!=" => {
-                self.emit(Cmp(AM::Register(r), AM::Register(l)));
+                self.emit(Compare(AM::Register(r), AM::Register(l)));
                 self.free_scratch(l);
 
                 let true_label = self.create_label();
                 let after_label = self.create_label();
 
                 match op {
-                    "<" => self.emit(Jl(true_label.clone())),
-                    ">" => self.emit(Jg(true_label.clone())),
-                    "==" => self.emit(Je(true_label.clone())),
-                    "!=" => self.emit(Jne(true_label.clone())),
+                    "<" => self.emit(JumpLess(true_label.clone())),
+                    ">" => self.emit(JumpGreater(true_label.clone())),
+                    "==" => self.emit(JumpEqual(true_label.clone())),
+                    "!=" => self.emit(JumpNotEqual(true_label.clone())),
                     _ => unreachable!(op),
                 };
                 self.emit(Move(AM::Immediate(FALSE), AM::Register(r)));
-                self.emit(Jmp(after_label.clone()));
+                self.emit(Jump(after_label.clone()));
                 self.emit(Label(true_label));
                 self.emit(Move(AM::Immediate(TRUE), AM::Register(r)));
                 self.emit(Label(after_label));
@@ -397,7 +397,7 @@ impl Compiler {
     ) -> Option<Register> {
         let done_label = self.create_label();
         let er = self.compile_expression(condition);
-        self.emit(Cmp(AM::Immediate(FALSE), AM::Register(er)));
+        self.emit(Compare(AM::Immediate(FALSE), AM::Register(er)));
         self.free_scratch(er);
 
         // could probably be optimized away
@@ -405,10 +405,10 @@ impl Compiler {
 
         let alt = if let Some(alt) = alternative {
             let alt_label = self.create_label();
-            self.emit(Je(alt_label.clone()));
+            self.emit(JumpEqual(alt_label.clone()));
             Some((alt_label, alt))
         } else {
-            self.emit(Je(done_label.clone()));
+            self.emit(JumpEqual(done_label.clone()));
             None
         };
 
@@ -421,7 +421,7 @@ impl Compiler {
         }
 
         if let Some((alt_label, alt)) = alt {
-            self.emit(Jmp(done_label.clone()));
+            self.emit(Jump(done_label.clone()));
             self.emit(Label(alt_label));
             let maybe_ar = self.compile_statement(*alt);
             if let Some(ar) = maybe_ar {
