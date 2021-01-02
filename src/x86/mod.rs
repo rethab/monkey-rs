@@ -94,7 +94,7 @@ impl Compiler {
                 );
                 self.ctx.define_function(name, label);
             }
-            IntLiteral { value, .. } => match self.ctx.define(name.clone()) {
+            IntLiteral { value, .. } => match self.ctx.define(name) {
                 Ref::Global(label) => {
                     self.declare_data_int_value(label, value as i32);
                 }
@@ -108,7 +108,7 @@ impl Compiler {
             },
             BooleanLiteral { value, .. } => {
                 let int_value = if value { TRUE } else { FALSE };
-                match self.ctx.define(name.clone()) {
+                match self.ctx.define(name) {
                     Ref::Global(label) => {
                         self.declare_data_int_value(label, int_value);
                     }
@@ -121,7 +121,7 @@ impl Compiler {
                     }
                 }
             }
-            StringLiteral { value, .. } => match self.ctx.define(name.clone()) {
+            StringLiteral { value, .. } => match self.ctx.define(name) {
                 Ref::Global(label) => {
                     let label2 = self.create_label("lit");
                     self.declare_data_string(label2.clone(), &value);
@@ -276,7 +276,9 @@ impl Compiler {
                 }
                 match self.ctx.resolve(&ident) {
                     Ref::Global(lbl) => {
-                        // TODO why not just return the global ref? why move to reg?
+                        // need to move into a register, because a function referenced
+                        // by global data cannot be called directly. When first moved
+                        // to register r, we can do `CALL r`
                         let r = self.alloc_scratch();
                         self.emit(Move(AM::Global(lbl.0), AM::Register(r)));
                         AM::Register(r)
