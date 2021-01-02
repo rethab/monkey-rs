@@ -30,10 +30,10 @@ pub enum GlobalValue {
 impl Compiler {
     pub fn compile(&mut self, p: ast::Program) {
         if let Some(r) = self.compile_statements(p.0) {
-            self.emit(Move(AM::Register(r), AM::Register(RAX)));
+            self.emit(Move(r.into(), RAX.into()));
             self.free_scratch(r);
         } else {
-            self.emit(Move(AM::Immediate(0), AM::Register(RAX)));
+            self.emit(Move(AM::Immediate(0), RAX.into()));
         }
 
         // for testing, just print RAX
@@ -110,11 +110,24 @@ impl Compiler {
     fn compile_expression(&mut self, exp: ast::Expression) -> Register {
         use ast::Expression::*;
         match exp {
-            Infix { op, lhs, rhs, .. } => {
-                let l = self.compile_expression(*lhs);
-                let r = self.compile_expression(*rhs);
-                self.compile_infix(&op, l, r)
-            }
+            Infix { op, lhs, rhs, .. } => match (*lhs, *rhs) {
+                (IntLiteral { value: l, .. }, IntLiteral { value: r, .. }) => {
+                    self.compile_infix(&op, AM::Immediate(l as i32), AM::Immediate(r as i32))
+                }
+                (IntLiteral { value: l, .. }, rhs) => {
+                    let r = self.compile_expression(rhs);
+                    self.compile_infix(&op, AM::Immediate(l as i32), r.into())
+                }
+                (lhs, IntLiteral { value: r, .. }) => {
+                    let l = self.compile_expression(lhs);
+                    self.compile_infix(&op, l.into(), AM::Immediate(r as i32))
+                }
+                (lhs, rhs) => {
+                    let l = self.compile_expression(lhs);
+                    let r = self.compile_expression(rhs);
+                    self.compile_infix(&op, l.into(), r.into())
+                }
+            },
             Prefix { op, rhs, .. } => {
                 let r = self.compile_expression(*rhs);
                 self.compile_prefix(&op, r)
@@ -328,60 +341,174 @@ impl Compiler {
         label
     }
 
-    fn compile_infix(&mut self, op: &str, l: Register, r: Register) -> Register {
+    fn compile_infix(&mut self, op: &str, l: AddressingMode, r: AddressingMode) -> Register {
         match op {
-            "+" => {
-                self.emit(Add(AM::Register(l), r));
-                self.free_scratch(l);
-                r
-            }
-            "-" => {
-                self.emit(Sub(AM::Register(r), l));
-                self.free_scratch(r);
-                l
-            }
-            "*" => {
-                self.emit(Move(AM::Register(r), AM::Register(RAX)));
-                self.emit(Mul(l));
-                self.emit(Move(AM::Register(RAX), AM::Register(l)));
-                self.free_scratch(r);
-                l
-            }
-            "/" => {
-                self.emit(Move(AM::Immediate(0), AM::Register(RDX)));
-                self.emit(Move(AM::Register(l), AM::Register(RAX)));
-                self.emit(Div(r));
-                self.emit(Move(AM::Register(RAX), AM::Register(l)));
-                self.free_scratch(r);
-                l
-            }
+            "+" => match (l, r) {
+                (AM::Immediate(l), AM::Immediate(r)) => {
+                    let res = self.alloc_scratch();
+                    self.emit(Move(AM::Immediate(l + r), res.into()));
+                    res
+                }
+                (l, AM::Register(r)) => {
+                    self.emit(Add(l.clone(), r));
+                    if let AM::Register(l) = l {
+                        self.free_scratch(l);
+                    }
+                    r
+                }
+                (AM::Register(l), r) => {
+                    self.emit(Add(r.clone(), l));
+                    if let AM::Register(r) = r {
+                        self.free_scratch(r);
+                    }
+                    l
+                }
+                other => panic!("Either side of + must be a register: {:?}", other),
+            },
+            "-" => match (l, r) {
+                (AM::Immediate(l), AM::Immediate(r)) => {
+                    let res = self.alloc_scratch();
+                    self.emit(Move(AM::Immediate(l - r), res.into()));
+                    res
+                }
+                (AM::Register(l), r) => {
+                    self.emit(Sub(r.clone(), l));
+                    if let AM::Register(r) = r {
+                        self.free_scratch(r);
+                    }
+                    l
+                }
+                (l, AM::Register(r)) => {
+                    let res = self.alloc_scratch();
+                    self.emit(Move(l, res.into()));
+                    self.emit(Sub(r.into(), res));
+                    self.free_scratch(r);
+                    res
+                }
+                other => panic!("Left side of - must be a register: {:?}", other),
+            },
+            "*" => match (l, r) {
+                (AM::Immediate(l), AM::Immediate(r)) => {
+                    let res = self.alloc_scratch();
+                    self.emit(Move(AM::Immediate(l * r), res.into()));
+                    res
+                }
+                (AM::Register(l), r) => {
+                    self.emit(Move(r.clone(), RAX.into()));
+                    self.emit(Mul(l));
+                    if let AM::Register(r) = r {
+                        self.free_scratch(r);
+                    }
+                    self.emit(Move(RAX.into(), l.into()));
+                    l
+                }
+                (l, AM::Register(r)) => {
+                    self.emit(Move(l.clone(), RAX.into()));
+                    self.emit(Mul(r));
+                    if let AM::Register(l) = l {
+                        self.free_scratch(l);
+                    }
+                    self.emit(Move(RAX.into(), r.into()));
+                    r
+                }
+                other => panic!("Either side of * must be a register: {:?}", other),
+            },
+            "/" => match (l, r) {
+                (AM::Immediate(l), AM::Immediate(r)) => {
+                    let res = self.alloc_scratch();
+                    self.emit(Move(AM::Immediate(l / r), res.into()));
+                    res
+                }
+                (l, r) => {
+                    self.emit(Move(AM::Immediate(0), AM::Register(RDX)));
+
+                    if let AM::Immediate(l) = l {
+                        self.emit(Move(AM::Immediate(l), RAX.into()));
+                    } else {
+                        self.emit(Move(l.clone(), RAX.into()));
+                        if let AM::Register(l) = l {
+                            self.free_scratch(l);
+                        }
+                    };
+
+                    let r = if let AM::Immediate(i) = r {
+                        let r = self.alloc_scratch();
+                        self.emit(Move(AM::Immediate(i), r.into()));
+                        r.into()
+                    } else {
+                        r
+                    };
+
+                    self.emit(Div(r.clone()));
+
+                    match (l, r) {
+                        (AM::Register(l), AM::Register(r)) => {
+                            self.free_scratch(l);
+                            self.emit(Move(RAX.into(), r.into()));
+                            r
+                        }
+                        (_, AM::Register(r)) => {
+                            self.emit(Move(RAX.into(), r.into()));
+                            r
+                        }
+                        (AM::Register(l), _) => {
+                            self.emit(Move(RAX.into(), l.into()));
+                            l
+                        }
+                        (_, _) => {
+                            let res = self.alloc_scratch();
+                            self.emit(Move(RAX.into(), res.into()));
+                            res
+                        }
+                    }
+                }
+            },
             "<" | ">" | "==" | "!=" => self.compile_infix_boolean(op, l, r),
             other => unimplemented!("infix {}", other),
         }
     }
 
-    fn compile_infix_boolean(&mut self, op: &str, l: Register, r: Register) -> Register {
-        let false_label = self.create_label("true");
+    fn compile_infix_boolean(&mut self, op: &str, l: AM, r: AM) -> Register {
+        let false_label = self.create_label("false");
         let after_label = self.create_label("after");
-        self.emit(Compare(AM::Register(r), AM::Register(l)));
-        self.free_scratch(l);
-        self.emit(self.jump_for_op(op, false_label.clone()));
-        self.emit(Move(AM::Immediate(TRUE), AM::Register(r)));
-        self.emit(Jump(after_label.clone()));
-        self.emit(Label(false_label));
-        self.emit(Move(AM::Immediate(FALSE), AM::Register(r)));
-        self.emit(Label(after_label));
-        r
-    }
 
-    fn jump_for_op(&self, op: &str, false_label: instructions::Label) -> Instruction {
-        match op {
-            "<" => JumpGreaterEqual(false_label),
-            ">" => JumpLessEqual(false_label),
-            "==" => JumpNotEqual(false_label),
-            "!=" => JumpEqual(false_label),
-            _ => unreachable!(op),
+        let res = self.alloc_scratch();
+        if let (AM::Immediate(l), AM::Immediate(r)) = (l.clone(), r.clone()) {
+            let truth = match op {
+                "<" => l < r,
+                ">" => l > r,
+                "==" => l == r,
+                "!=" => l != r,
+                _ => unreachable!(op),
+            };
+            if truth {
+                self.emit(Move(AM::Immediate(TRUE), AM::Register(res)));
+            } else {
+                self.emit(Move(AM::Immediate(FALSE), AM::Register(res)));
+            }
+        } else {
+            if let AM::Immediate(l) = l {
+                self.emit(Compare(AM::Immediate(l), r.clone()));
+                self.emit(Instruction::jump_for_op_inv(op, false_label.clone()));
+            } else {
+                self.emit(Compare(r.clone(), l.clone()));
+                self.emit(Instruction::jump_for_op(op, false_label.clone()));
+            }
+            self.emit(Move(AM::Immediate(TRUE), AM::Register(res)));
+            self.emit(Jump(after_label.clone()));
+            self.emit(Label(false_label));
+            self.emit(Move(AM::Immediate(FALSE), AM::Register(res)));
+            self.emit(Label(after_label));
         }
+
+        if let AM::Register(l) = l {
+            self.free_scratch(l);
+        }
+        if let AM::Register(r) = r {
+            self.free_scratch(r);
+        }
+
+        res
     }
 
     fn compile_prefix(&mut self, op: &str, r: Register) -> Register {
@@ -414,7 +541,7 @@ impl Compiler {
 
             self.free_scratch(l);
             self.free_scratch(r);
-            self.emit(self.jump_for_op(&op, false_label.clone()));
+            self.emit(Instruction::jump_for_op(&op, false_label.clone()));
         } else {
             let er = self.compile_expression(condition);
             self.emit(Compare(AM::Immediate(FALSE), AM::Register(er)));

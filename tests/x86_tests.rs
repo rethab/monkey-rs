@@ -33,6 +33,17 @@ mod test {
         assert_eq!(run_to_int("5 / 5"), 1);
         assert_eq!(run_to_int("10 / 5 * 2"), 4);
         assert_eq!(run_to_int("42 / 21 + 7 - 2 * 3"), 3);
+        assert_eq!(run_to_int("let five = 5; five + five + 5"), 15);
+        assert_eq!(run_to_int("let five = 5; five - 5"), 0);
+        assert_eq!(run_to_int("let five = 5; 5 - five"), 0);
+        assert_eq!(run_to_int("let five = 5; let one = 1; five - one"), 4);
+        assert_eq!(run_to_int("let five = 5; five * 5"), 25);
+        assert_eq!(run_to_int("let five = 5; five * five"), 25);
+        assert_eq!(run_to_int("let five = 5; 5 * five"), 25);
+        assert_eq!(run_to_int("let five = 5; five / 5"), 1);
+        assert_eq!(run_to_int("let five = 5; 5 / five"), 1);
+        assert_eq!(run_to_int("let five = 5; five / five"), 1);
+        assert_eq!(run_to_int("let twelve = 12; twelve / 4"), 3);
     }
 
     #[test]
@@ -54,6 +65,16 @@ mod test {
         assert_eq!(run_to_int("!(2 < 1)"), TRUE);
         assert_eq!(run_to_int("!!(2 < 1)"), FALSE);
         assert_eq!(run_to_int("!!!(2 < 1)"), TRUE);
+        assert_eq!(run_to_int("let five = 5; five == 5"), TRUE);
+        assert_eq!(run_to_int("let five = 5; 5 == five"), TRUE);
+        assert_eq!(run_to_int("let five = 5; five != 4"), TRUE);
+        assert_eq!(run_to_int("let five = 5; 4 != five"), TRUE);
+        assert_eq!(run_to_int("let five = 5; 3 < five"), TRUE);
+        assert_eq!(run_to_int("let five = 5; five < 3"), FALSE);
+        assert_eq!(run_to_int("let five = 5; five < five"), FALSE);
+        assert_eq!(run_to_int("let five = 5; 3 > five"), FALSE);
+        assert_eq!(run_to_int("let five = 5; five > 3"), TRUE);
+        assert_eq!(run_to_int("let five = 5; five > five"), FALSE);
     }
 
     #[test]
@@ -567,7 +588,7 @@ mod test {
         }
 
         // track codesize to see improvements
-        assert_eq!(194, instruction_length);
+        assert_eq!(191, instruction_length);
     }
 
     #[test]

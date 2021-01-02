@@ -7,7 +7,7 @@ pub enum Instruction {
     Add(AddressingMode, Register),
     Sub(AddressingMode, Register),
     Mul(Register),
-    Div(Register),
+    Div(AddressingMode),
     Xor(AddressingMode, AddressingMode),
     Compare(AddressingMode, AddressingMode),
     Jump(Label),
@@ -15,11 +15,34 @@ pub enum Instruction {
     JumpNotEqual(Label),
     JumpLessEqual(Label),
     JumpGreaterEqual(Label),
+    JumpLess(Label),
+    JumpGreater(Label),
     Push(Register),
     Pop(Register),
     Call(AddressingMode),
     Return,
     Label(Label),
+}
+
+impl Instruction {
+    pub fn jump_for_op(op: &str, false_label: Label) -> Instruction {
+        match op {
+            "<" => Instruction::JumpGreaterEqual(false_label),
+            ">" => Instruction::JumpLessEqual(false_label),
+            "==" => Instruction::JumpNotEqual(false_label),
+            "!=" => Instruction::JumpEqual(false_label),
+            _ => unreachable!(op),
+        }
+    }
+    pub fn jump_for_op_inv(op: &str, false_label: Label) -> Instruction {
+        match op {
+            "<" => Instruction::JumpLess(false_label),
+            ">" => Instruction::JumpGreater(false_label),
+            "==" => Instruction::JumpNotEqual(false_label),
+            "!=" => Instruction::JumpEqual(false_label),
+            _ => unreachable!(op),
+        }
+    }
 }
 
 pub struct Function(pub Vec<Instruction>);
@@ -60,6 +83,12 @@ pub enum Register {
     R13,
     R14,
     R15,
+}
+
+impl Into<AddressingMode> for Register {
+    fn into(self) -> AddressingMode {
+        AddressingMode::Register(self)
+    }
 }
 
 // system v abi: the first four arguments go into these registers.
@@ -115,7 +144,9 @@ impl fmt::Display for Instruction {
             JumpEqual(lbl) => write!(f, "JE {}", lbl.0),
             JumpNotEqual(lbl) => write!(f, "JNE {}", lbl.0),
             JumpLessEqual(lbl) => write!(f, "JLE {}", lbl.0),
+            JumpLess(lbl) => write!(f, "JL {}", lbl.0),
             JumpGreaterEqual(lbl) => write!(f, "JGE {}", lbl.0),
+            JumpGreater(lbl) => write!(f, "JG {}", lbl.0),
             Call(trg) => write!(f, "CALL {}", trg),
             Push(r) => write!(f, "PUSHQ {}", r),
             Pop(r) => write!(f, "POPQ {}", r),
